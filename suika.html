@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>ふわもこマージ どうぶつ</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%; width: 100%;
+    background: #ffe3f1;
+    font-family: -apple-system, "Hiragino Maru Gothic ProN", "Hiragino Kaku Gothic ProN", sans-serif;
+    overflow: hidden; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
+  }
+  #game { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; cursor: pointer; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+// ===== 進化テーブル =====
+const LV = [
+  { rf: 0.052, color: "#b9b9cc", ear: "round",  name: "ねずみ" },
+  { rf: 0.067, color: "#ffe08a", ear: "chick",  name: "ひよこ" },
+  { rf: 0.085, color: "#ffffff", ear: "long",   name: "うさぎ" },
+  { rf: 0.106, color: "#ffc27a", ear: "pointy", name: "ねこ" },
+  { rf: 0.131, color: "#ffb0cd", ear: "pig",    name: "ぶた" },
+  { rf: 0.160, color: "#cda06f", ear: "round",  name: "くま" },
+  { rf: 0.194, color: "#eceaf0", ear: "panda",  name: "ぱんだ" },
+  { rf: 0.234, color: "#ff8fb5", ear: "crown",  name: "だいおう" },
+];
+const MAX = LV.length - 1;
+
+// ===== レイアウト =====
+let W, H, binL, binR, binTop, binBot, binW, hoverY, lineY, GRAV;
+function radius(level) { return LV[level].rf * binW; }
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = Math.floor(W * dpr); canvas.height = Math.floor(H * dpr);
+  canvas.style.width = W + "px"; canvas.style.height = H + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const top = clamp(H * 0.16, 80, 150);
+  binBot = H * 0.97;
+  binW = Math.min(W * 0.94, (binBot - top) * 0.78, 460);
+  binL = (W - binW) / 2; binR = binL + binW;
+  binTop = top;
+  const maxDropR = radius(3);
+  hoverY = binTop + maxDropR + 8;
+  lineY = binTop + 4;
+  GRAV = binW * 0.0013;
+}
+
+// ===== 状態 =====
+const STATE = { READY: 0, PLAY: 1, OVER: 2 };
+let state = STATE.READY;
+let balls, cur, nxt, curX, dropCD, score, best, overTimer, pops, frame;
+best = Number(localStorage.getItem("suikaBest") || 0);
+balls = []; pops = []; frame = 0; overTimer = 0; dropCD = 0; score = 0;
+
+function randLevel() { const r = Math.random(); return r < 0.4 ? 0 : r < 0.72 ? 1 : r < 0.92 ? 2 : 3; }
+
+function reset() {
+  resize();
+  balls = []; pops = []; score = 0; overTimer = 0; dropCD = 0; frame = 0;
+  cur = { level: randLevel() }; nxt = { level: randLevel() };
+  curX = (binL + binR) / 2;
+  state = STATE.PLAY;
+}
+
+function aim(x) { curX = clamp(x, binL + radius(cur.level), binR - radius(cur.level)); }
+
+function drop() {
+  if (dropCD > 0) return;
+  const r = radius(cur.level);
+  balls.push({ x: curX, y: hoverY, px: curX, py: hoverY - 0.1, r, level: cur.level, age: 0 });
+  cur.level = nxt.level; nxt.level = randLevel();
+  dropCD = 22;
+}
+
+function gameOver() {
+  state = STATE.OVER;
+  if (score > best) { best = score; localStorage.setItem("suikaBest", best); }
+}
+
+// ===== 入力 =====
+let pdown = false;
+function release(x) {
+  if (state === STATE.READY) { reset(); return; }
+  if (state === STATE.OVER) { if (frame - overTimer > 30) state = STATE.READY; return; }
+  if (state === STATE.PLAY) { aim(x); drop(); }
+}
+canvas.addEventListener("pointerdown", e => { e.preventDefault(); pdown = true; if (state === STATE.PLAY) aim(e.clientX); });
+canvas.addEventListener("pointermove", e => { if (state === STATE.PLAY) aim(e.clientX); });
+canvas.addEventListener("pointerup", e => { e.preventDefault(); pdown = false; release(e.clientX); });
+canvas.addEventListener("pointercancel", () => { pdown = false; });
+window.addEventListener("keydown", e => {
+  if (e.code === "Space" || e.code === "Enter") { e.preventDefault(); if (state === STATE.PLAY) drop(); else release(curX || W / 2); }
+  if (state === STATE.PLAY && e.code === "ArrowLeft") aim(curX - binW * 0.06);
+  if (state === STATE.PLAY && e.code === "ArrowRight") aim(curX + binW * 0.06);
+});
+
+// ===== 物理 (Verlet) =====
+const FRICTION = 0.985, ITER = 8;
+function physics() {
+  for (const b of balls) {
+    b.age++;
+    let vx = (b.x - b.px) * FRICTION, vy = (b.y - b.py) * FRICTION;
+    b.px = b.x; b.py = b.y;
+    b.x += vx; b.y += vy + GRAV;
+  }
+  // マージ(接触した同レベル)
+  const used = new Set(); const born = [];
+  for (let i = 0; i < balls.length; i++) {
+    if (used.has(i)) continue;
+    for (let j = i + 1; j < balls.length; j++) {
+      if (used.has(j)) continue;
+      const a = balls[i], c = balls[j];
+      if (a.level !== c.level) continue;
+      const dx = c.x - a.x, dy = c.y - a.y, d = Math.hypot(dx, dy);
+      if (d < a.r + c.r) {
+        used.add(i); used.add(j);
+        const mx = (a.x + c.x) / 2, my = (a.y + c.y) / 2;
+        score += (a.level + 1) * 2;
+        for (let k = 0; k < 10; k++) pops.push({ x: mx, y: my, vx: (Math.random() - 0.5) * 5, vy: (Math.random() - 0.7) * 5, life: 1, c: LV[Math.min(a.level + 1, MAX)].color });
+        if (a.level < MAX) {
+          const nl = a.level + 1;
+          born.push({ x: mx, y: my, px: mx, py: my, r: radius(nl), level: nl, age: 5 });
+        } else {
+          score += 60; // だいおう同士は大得点で消滅
+        }
+        break;
+      }
+    }
+  }
+  if (used.size) { balls = balls.filter((_, i) => !used.has(i)).concat(born); }
+
+  // 拘束解決
+  for (let it = 0; it < ITER; it++) {
+    for (const b of balls) {
+      if (b.x < binL + b.r) b.x = binL + b.r;
+      if (b.x > binR - b.r) b.x = binR - b.r;
+      if (b.y > binBot - b.r) b.y = binBot - b.r;
+    }
+    for (let i = 0; i < balls.length; i++) {
+      for (let j = i + 1; j < balls.length; j++) {
+        const a = balls[i], c = balls[j];
+        let dx = c.x - a.x, dy = c.y - a.y, d = Math.hypot(dx, dy);
+        const min = a.r + c.r;
+        if (d < min && d > 0.0001) {
+          const corr = Math.min((min - d) / 2, a.r * 0.5);
+          const nx = dx / d, ny = dy / d;
+          a.x -= nx * corr; a.y -= ny * corr;
+          c.x += nx * corr; c.y += ny * corr;
+        }
+      }
+    }
+  }
+}
+
+function update() {
+  frame++;
+  if (dropCD > 0) dropCD--;
+  if (state === STATE.PLAY) {
+    physics();
+    // ゲームオーバー判定: 落ち着いた玉が線を超えて居座る
+    let danger = false;
+    for (const b of balls) {
+      const sp = Math.hypot(b.x - b.px, b.y - b.py);
+      if (b.age > 55 && (b.y - b.r) < lineY && sp < binW * 0.004) danger = true;
+    }
+    overTimer = danger ? overTimer + 1 : Math.max(0, overTimer - 3);
+    if (overTimer > 90) { overTimer = frame; gameOver(); }
+  }
+  for (const p of pops) { p.x += p.vx; p.y += p.vy; p.vy += 0.3; p.life -= 0.035; }
+  pops = pops.filter(p => p.life > 0);
+}
+
+// ===== 描画 =====
+function circle(x, y, r) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
+
+function drawEars(type, r, color) {
+  ctx.fillStyle = color;
+  if (type === "round") { circle(-r * 0.5, -r * 0.7, r * 0.34); circle(r * 0.5, -r * 0.7, r * 0.34); }
+  else if (type === "long") {
+    for (const s of [-1, 1]) { ctx.save(); ctx.translate(s * r * 0.4, -r * 0.6); ctx.rotate(s * 0.2);
+      ctx.fillStyle = color; ctx.beginPath(); ctx.ellipse(0, -r * 0.7, r * 0.2, r * 0.8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#ffc2dd"; ctx.beginPath(); ctx.ellipse(0, -r * 0.7, r * 0.09, r * 0.5, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }
+  }
+  else if (type === "pointy" || type === "pig") {
+    for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(s * r * 0.3, -r * 0.55); ctx.lineTo(s * r * 0.78, -r * 1.05); ctx.lineTo(s * r * 0.82, -r * 0.45); ctx.closePath(); ctx.fill(); }
+  }
+  else if (type === "chick") { /* くちばしのみ */ }
+  else if (type === "panda") { ctx.fillStyle = "#3a3340"; circle(-r * 0.55, -r * 0.65, r * 0.32); circle(r * 0.55, -r * 0.65, r * 0.32); }
+  else if (type === "crown") {
+    ctx.fillStyle = "#ffd86b"; ctx.beginPath();
+    ctx.moveTo(-r * 0.55, -r * 0.55); ctx.lineTo(-r * 0.55, -r * 1.05); ctx.lineTo(-r * 0.22, -r * 0.75);
+    ctx.lineTo(0, -r * 1.2); ctx.lineTo(r * 0.22, -r * 0.75); ctx.lineTo(r * 0.55, -r * 1.05); ctx.lineTo(r * 0.55, -r * 0.55);
+    ctx.closePath(); ctx.fill();
+  }
+}
+
+function drawBall(b) {
+  const L = LV[b.level], r = b.r;
+  ctx.save(); ctx.translate(b.x, b.y);
+  drawEars(L.ear, r, L.color);
+  // からだ
+  ctx.fillStyle = L.color; circle(0, 0, r);
+  // ほっぺ
+  ctx.fillStyle = "rgba(255,140,175,0.45)"; circle(-r * 0.45, r * 0.22, r * 0.15); circle(r * 0.45, r * 0.22, r * 0.15);
+  // パンダの目もと
+  if (L.ear === "panda") { ctx.fillStyle = "#3a3340"; ctx.save(); ctx.beginPath(); ctx.ellipse(-r * 0.3, -r * 0.02, r * 0.2, r * 0.26, 0.4, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.ellipse(r * 0.3, -r * 0.02, r * 0.2, r * 0.26, -0.4, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }
+  // め
+  ctx.fillStyle = "#4a3a44"; circle(-r * 0.28, -r * 0.05, r * 0.1); circle(r * 0.28, -r * 0.05, r * 0.1);
+  ctx.fillStyle = "#fff"; circle(-r * 0.24, -r * 0.1, r * 0.035); circle(r * 0.32, -r * 0.1, r * 0.035);
+  // くち
+  ctx.strokeStyle = "#b5566f"; ctx.lineWidth = Math.max(1, r * 0.05); ctx.lineCap = "round";
+  ctx.beginPath(); ctx.arc(0, r * 0.18, r * 0.16, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke();
+  // ぶたの鼻 / ひよこのくちばし
+  if (L.ear === "pig") { ctx.fillStyle = "#ff8fb5"; ctx.beginPath(); ctx.ellipse(0, r * 0.12, r * 0.22, r * 0.15, 0, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = "#e06b93"; circle(-r * 0.08, r * 0.12, r * 0.04); circle(r * 0.08, r * 0.12, r * 0.04); }
+  if (L.ear === "chick") { ctx.fillStyle = "#ff9a3d"; ctx.beginPath(); ctx.moveTo(-r * 0.12, r * 0.12); ctx.lineTo(r * 0.12, r * 0.12); ctx.lineTo(0, r * 0.32); ctx.closePath(); ctx.fill(); }
+  ctx.restore();
+}
+
+function drawBg() {
+  const sky = ctx.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, "#ffe3f1"); sky.addColorStop(1, "#d8f0ff");
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+}
+
+function jarPath() {
+  const r = 22;
+  ctx.beginPath();
+  ctx.moveTo(binL - 6, binTop);
+  ctx.lineTo(binL - 6, binBot - r);
+  ctx.arcTo(binL - 6, binBot + 6, binL - 6 + r, binBot + 6, r);
+  ctx.lineTo(binR + 6 - r, binBot + 6);
+  ctx.arcTo(binR + 6, binBot + 6, binR + 6, binBot - r, r);
+  ctx.lineTo(binR + 6, binTop);
+}
+
+function drawJar() {
+  ctx.save();
+  jarPath(); ctx.fillStyle = "rgba(255,255,255,0.28)"; ctx.fill();
+  jarPath(); ctx.lineWidth = 6; ctx.strokeStyle = "rgba(255,255,255,0.75)"; ctx.stroke();
+  ctx.restore();
+}
+
+function text(t, y, size, color, align, x) {
+  ctx.fillStyle = color || "#fff"; ctx.font = `bold ${size}px sans-serif`;
+  ctx.textAlign = align || "center"; ctx.lineWidth = size * 0.12; ctx.strokeStyle = "rgba(120,60,90,0.4)";
+  const px = x != null ? x : (align === "left" ? 20 : W / 2);
+  ctx.strokeText(t, px, y); ctx.fillText(t, px, y);
+}
+
+function draw() {
+  drawBg();
+
+  if (state === STATE.READY) {
+    drawJar();
+    // 進化の見本を表示
+    const n = LV.length; const gy = H * 0.5;
+    for (let i = 0; i < n; i++) {
+      const gx = binL + binW * (0.1 + 0.8 * i / (n - 1));
+      const rr = clamp(binW * 0.05, 12, 26);
+      const b = { x: gx, y: gy, r: rr, level: i }; drawBall(b);
+    }
+    text("ふわもこマージ", H * 0.26, clamp(binW * 0.1, 24, 46), "#ff5e93");
+    text("どうぶつ", H * 0.33, clamp(binW * 0.075, 18, 36), "#ff5e93");
+    text("同じ子をくっつけて 進化させよう！", H * 0.62, clamp(binW * 0.04, 12, 19), "#a8436b");
+    text("タップ/動かして落とす", H * 0.67, clamp(binW * 0.04, 12, 19), "#a8436b");
+    text("▶ タップでスタート ◀", H * 0.74, clamp(binW * 0.045, 13, 22), "#a8436b");
+    return;
+  }
+
+  // 危険ライン
+  ctx.save(); ctx.strokeStyle = overTimer > 20 ? "rgba(255,80,120,0.9)" : "rgba(255,120,150,0.45)";
+  ctx.lineWidth = 2; ctx.setLineDash([8, 8]);
+  ctx.beginPath(); ctx.moveTo(binL, lineY); ctx.lineTo(binR, lineY); ctx.stroke(); ctx.restore();
+
+  drawJar();
+  balls.forEach(drawBall);
+
+  // 落とす玉(ホバー) + ガイド
+  if (state === STATE.PLAY && dropCD < 12) {
+    ctx.save(); ctx.strokeStyle = "rgba(255,255,255,0.5)"; ctx.lineWidth = 2; ctx.setLineDash([4, 8]);
+    ctx.beginPath(); ctx.moveTo(curX, hoverY + radius(cur.level)); ctx.lineTo(curX, binBot); ctx.stroke(); ctx.restore();
+    drawBall({ x: curX, y: hoverY, r: radius(cur.level), level: cur.level });
+  }
+
+  // ポップ(マージ演出)
+  for (const p of pops) { ctx.globalAlpha = Math.max(0, p.life); ctx.fillStyle = p.c; circle(p.x, p.y, 5); }
+  ctx.globalAlpha = 1;
+
+  // HUD
+  text("スコア " + score, clamp(H * 0.07, 34, 70), clamp(binW * 0.06, 18, 30), "#ff5e93", "left");
+  text("ベスト " + best, clamp(H * 0.07, 34, 70) + clamp(binW * 0.06, 18, 30) * 0.9, clamp(binW * 0.04, 12, 18), "#a8436b", "left");
+  // 次の子
+  const nr = clamp(binW * 0.05, 14, 26);
+  text("つぎ", W - 20 - nr, clamp(H * 0.055, 26, 56), clamp(binW * 0.035, 11, 16), "#a8436b", "center", W - 20 - nr);
+  drawBall({ x: W - 20 - nr, y: clamp(H * 0.055, 26, 56) + nr * 1.3, r: nr, level: nxt.level });
+
+  if (state === STATE.OVER) {
+    ctx.fillStyle = "rgba(120,60,90,0.5)"; ctx.fillRect(0, 0, W, H);
+    text("おしまい！", H * 0.4, clamp(binW * 0.1, 28, 50), "#fff");
+    text("スコア " + score, H * 0.5, clamp(binW * 0.06, 18, 28), "#fff");
+    text("ベスト " + best, H * 0.56, clamp(binW * 0.05, 14, 24), "#fff3b0");
+    text("タップでもう一回", H * 0.66, clamp(binW * 0.045, 13, 22), "#fff");
+  }
+}
+
+function loop() { update(); draw(); requestAnimationFrame(loop); }
+window.addEventListener("resize", () => { const playing = state === STATE.PLAY; resize(); if (playing) for (const b of balls) { b.r = radius(b.level); } });
+resize(); loop();
+</script>
+</body>
+</html>
