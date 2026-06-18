@@ -14,6 +14,7 @@ HTML・CSS・JavaScript だけで作られていて、**ビルド作業も外部
 | ゲーム | ファイル | 公開URL |
 |--------|----------|---------|
 | ふわもこマージ どうぶつ（スイカゲーム風） | `suika.html` | https://niu111888.github.io/fuwamoko-merge/suika.html |
+| ふわもこタイピング 3カ国語（英語/中国語/日本語） | `typing.html` | https://niu111888.github.io/fuwamoko-merge/typing.html |
 | パンチヒーロー ぶたさん | `index.html` | https://niu111888.github.io/fuwamoko-merge/ |
 
 - スマホ・PCどちらのブラウザでも遊べます（レスポンシブ＆タッチ操作対応）。
@@ -87,6 +88,7 @@ push すると **GitHub Pages が自動で再ビルド**して、数十秒後に
 fuwamoko-merge/
 ├── index.html   … パンチヒーロー ぶたさん（公開時のトップページ）
 ├── suika.html   … ふわもこマージ どうぶつ（スイカゲーム風）
+├── typing.html  … ふわもこタイピング 3カ国語（英語/中国語/日本語）
 ├── README.md    … このファイル（開発ガイド）
 └── .claude/
     └── launch.json … ローカルプレビュー用の設定（python http.server）
