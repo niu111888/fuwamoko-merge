@@ -422,7 +422,19 @@ function drawSentence(w) {
   ctx.font = `bold ${sub}px monospace`; ctx.textAlign = "left";
   for (const l of tLines) {
     const lw = l.length * charW; let x = cx - lw / 2; const ly = y + lineHt / 2;
-    for (const c of l) { ctx.fillStyle = c.gi < w.matched ? "#ff3d7f" : "#9a7d8b"; ctx.fillText(c.ch, x, ly); x += charW; }
+    for (const c of l) {
+      const done = c.gi < w.matched;
+      if (c.ch === " ") {
+        // スペースは「目印（小さなスペースバー）」で見えるように
+        const mw = charW * 0.62, mh = Math.max(2.5, 3 * unit);
+        ctx.fillStyle = done ? "#ff3d7f" : "rgba(154,125,139,0.5)";
+        roundRect(x + (charW - mw) / 2, ly + sub * 0.26, mw, mh, mh / 2); ctx.fill();
+      } else {
+        ctx.fillStyle = done ? "#ff3d7f" : "#9a7d8b";
+        ctx.fillText(c.ch, x, ly);
+      }
+      x += charW;
+    }
     y += lineHt;
   }
   ctx.textAlign = "center";
