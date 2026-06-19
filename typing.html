@@ -302,7 +302,70 @@ function pickWordItem() {
   return cands[Math.floor(Math.random() * cands.length)];
 }
 function nextPractice() { if (!pqueue.length) pqueue = shuffle(itemPool().slice()); return pqueue.pop(); }
-function makeItem(src, sentence) { return { native: src.native, typed: src.typed, hint: src.hint || "", x: 0, y: 0, matched: 0, vy: 0, hue: Math.floor(Math.random() * 6), sentence: !!sentence }; }
+function makeItem(src, sentence) {
+  const it = { native: src.native, typed: src.typed, hint: src.hint || "", x: 0, y: 0, matched: 0, vy: 0, hue: Math.floor(Math.random() * 6), sentence: !!sentence };
+  if (/[ぁ-ゖ]/.test(src.native)) { // 日本語: ローマ字音節エンジンで複数の打ち方を許可
+    it._jp = true; it.tokens = buildTokens(src.typed); it.ci = 0; it.buf = "";
+    while (it.tokens[it.ci] && it.tokens[it.ci].t === "sep") it.ci++;
+    it.firstChars = new Set();
+    const t0 = it.tokens[it.ci]; if (t0) for (const a of t0.alts) it.firstChars.add(a[0]);
+  }
+  return it;
+}
+
+// ===== ローマ字音節エンジン(検証済みtypedを音節分解し、別表記を許可) =====
+const VOW = "aiueo";
+const isVow = c => VOW.indexOf(c) >= 0;
+const isCons = c => /[a-z]/.test(c) && !isVow(c);
+const SYL_ALTS = {
+  shi: ["shi", "si"], chi: ["chi", "ti"], tsu: ["tsu", "tu"], fu: ["fu", "hu"], ji: ["ji", "zi"],
+  sha: ["sha", "sya", "shixya", "shilya", "sixya", "silya"], shu: ["shu", "syu", "shyu", "shixyu", "shilyu", "sixyu", "silyu"], sho: ["sho", "syo", "shyo", "shixyo", "shilyo", "sixyo", "silyo"],
+  cha: ["cha", "tya", "cya", "chixya", "chilya", "tixya", "tilya"], chu: ["chu", "tyu", "cyu", "chixyu", "chilyu", "tixyu", "tilyu"], cho: ["cho", "tyo", "cyo", "chixyo", "chilyo", "tixyo", "tilyo"],
+  ja: ["ja", "jya", "zya", "jixya", "jilya", "zixya", "zilya"], ju: ["ju", "jyu", "zyu", "jixyu", "jilyu", "zixyu", "zilyu"], jo: ["jo", "jyo", "zyo", "jixyo", "jilyo", "zixyo", "zilyo"],
+  kya: ["kya", "kixya", "kilya"], kyu: ["kyu", "kixyu", "kilyu"], kyo: ["kyo", "kixyo", "kilyo"],
+  gya: ["gya", "gixya", "gilya"], gyu: ["gyu", "gixyu", "gilyu"], gyo: ["gyo", "gixyo", "gilyo"],
+  nya: ["nya", "nixya", "nilya"], nyu: ["nyu", "nixyu", "nilyu"], nyo: ["nyo", "nixyo", "nilyo"],
+  hya: ["hya", "hixya", "hilya"], hyu: ["hyu", "hixyu", "hilyu"], hyo: ["hyo", "hixyo", "hilyo"],
+  bya: ["bya", "bixya", "bilya"], byu: ["byu", "bixyu", "bilyu"], byo: ["byo", "bixyo", "bilyo"],
+  pya: ["pya", "pixya", "pilya"], pyu: ["pyu", "pixyu", "pilyu"], pyo: ["pyo", "pixyo", "pilyo"],
+  mya: ["mya", "mixya", "milya"], myu: ["myu", "mixyu", "milyu"], myo: ["myo", "mixyo", "milyo"],
+  rya: ["rya", "rixya", "rilya"], ryu: ["ryu", "rixyu", "rilyu"], ryo: ["ryo", "rixyo", "rilyo"],
+};
+function tokenizeRomaji(s) {
+  const toks = []; let i = 0;
+  while (i < s.length) {
+    const c = s[i];
+    if (c === " ") { toks.push({ t: "sep", s: " " }); i++; continue; }
+    if (c === "t" && s[i + 1] === "c" && s[i + 2] === "h") { toks.push({ t: "sokuon", s: "t" }); i++; continue; }
+    if (isCons(c) && c !== "n" && s[i + 1] === c) { toks.push({ t: "sokuon", s: c }); i++; continue; }
+    if (c === "n") { const nx = s[i + 1]; if (nx === undefined || (!isVow(nx) && nx !== "y")) { toks.push({ t: "n", s: "n" }); i++; continue; } }
+    let j = i, cl = "";
+    while (j < s.length && isCons(s[j])) { cl += s[j]; j++; }
+    if (j < s.length && isVow(s[j])) { toks.push({ t: "syl", s: cl + s[j] }); i = j + 1; continue; }
+    toks.push({ t: "syl", s: c }); i++;
+  }
+  return toks;
+}
+function tokenAlts(tok, next) {
+  if (tok.t === "sep") return [" "];
+  if (tok.t === "sokuon") return [tok.s, "xtu", "ltu", "xtsu", "ltsu"];
+  if (tok.t === "n") {
+    if (next && next.t === "syl" && (isVow(next.s[0]) || next.s[0] === "y")) return ["nn", "xn"]; // 母音/yの前は nn 必須
+    if (next && next.t === "syl" && next.s[0] === "n") return ["n", "xn"];                        // な行の前は単独nで確定(次のnを残す)
+    return ["n", "nn", "xn"];
+  }
+  return SYL_ALTS[tok.s] || [tok.s];
+}
+function buildTokens(romaji) { const toks = tokenizeRomaji(romaji); for (let i = 0; i < toks.length; i++) toks[i].alts = tokenAlts(toks[i], toks[i + 1]); return toks; }
+function jpSkipSep(w) { while (w.tokens[w.ci] && w.tokens[w.ci].t === "sep") w.ci++; }
+function jpDone(w) { jpSkipSep(w); return w.ci >= w.tokens.length; }
+function jpExpected(w) { const t = w.tokens[w.ci]; if (!t) return ""; const cand = t.alts.find(a => a.startsWith(w.buf)) || t.alts[0] || ""; return cand[w.buf.length] || ""; }
+function jpMatched(w) {
+  let n = 0; for (let i = 0; i < w.ci; i++) n += w.tokens[i].s.length;
+  const t = w.tokens[w.ci]; if (t && t.t !== "sep") n += Math.min(w.buf.length, t.s.length);
+  return n;
+}
+function canStart(w, ch) { return w._jp ? w.firstChars.has(ch) : w.typed[0] === ch; }
 
 function start() {
   format = chosen._fmt; kind = chosen.kind;
@@ -344,25 +407,56 @@ function handleChar(ch) {
   if (!active) {
     if (ch === " ") return;
     let cand = null;
-    for (const w of words) if (w.typed[0] === ch && (!cand || w.y > cand.y)) cand = w;
-    totalKeys++;
-    if (cand) { active = cand; active.matched = 1; correctKeys++; combo++; maxCombo = Math.max(maxCombo, combo); checkComplete(); }
-    else { combo = 0; shake = 4; }
+    for (const w of words) if (canStart(w, ch) && (!cand || w.y > cand.y)) cand = w;
+    if (cand) { active = cand; feedActive(ch); }
+    else { totalKeys++; combo = 0; shake = 4; }
     return;
   }
-  const expected = active.typed[active.matched];
+  feedActive(ch);
+}
+function feedActive(ch) {
+  const w = active;
+  if (w._jp) return feedJP(w, ch);
+  const expected = w.typed[w.matched];
   if (/[a-z]/.test(expected)) keyAttempt[expected] = (keyAttempt[expected] || 0) + 1;
   totalKeys++;
-  if (expected === ch) { active.matched++; correctKeys++; combo++; maxCombo = Math.max(maxCombo, combo); checkComplete(); }
+  if (expected === ch) { w.matched++; correctKeys++; combo++; maxCombo = Math.max(maxCombo, combo); if (w.matched >= w.typed.length) completeWord(w); }
   else { if (/[a-z]/.test(expected)) keyMiss[expected] = (keyMiss[expected] || 0) + 1; combo = 0; shake = 4; }
 }
-function checkComplete() {
-  if (active.matched >= active.typed.length) {
-    const w = active;
-    score += 100 + w.typed.length * 10 + combo * 5; cleared++;
-    for (let i = 0; i < 16; i++) pops.push({ x: w.x, y: w.y, vx: (Math.random() - 0.5) * 7, vy: (Math.random() - 0.7) * 7, life: 1, c: CAP_COLORS[w.hue] });
-    words = words.filter(x => x !== w); active = null;
+function feedJP(w, ch) {
+  jpSkipSep(w);
+  if (w.ci >= w.tokens.length) return;
+  const expected = jpExpected(w);
+  if (/[a-z]/.test(expected)) keyAttempt[expected] = (keyAttempt[expected] || 0) + 1;
+  totalKeys++;
+  let ok = false;
+  for (let tries = 0; tries < 2; tries++) {
+    jpSkipSep(w);
+    const t = w.tokens[w.ci]; if (!t) break;
+    const test = w.buf + ch;
+    const cands = t.alts.filter(a => a.startsWith(test));
+    if (cands.length) {
+      w.buf = test;
+      if (t.alts.includes(w.buf) && !t.alts.some(a => a.length > w.buf.length && a.startsWith(w.buf))) { w.ci++; w.buf = ""; jpSkipSep(w); }
+      ok = true; break;
+    } else if (w.buf !== "" && t.alts.includes(w.buf)) { w.ci++; w.buf = ""; jpSkipSep(w); continue; }
+    else break;
   }
+  if (ok) {
+    correctKeys++; combo++; maxCombo = Math.max(maxCombo, combo);
+    // 末尾トークン(主に「ん」)で短い候補が既に成立していれば確定(次の入力が来ないため)
+    if (!jpDone(w)) {
+      const t = w.tokens[w.ci];
+      if (t && w.buf && t.alts.includes(w.buf) && w.tokens.slice(w.ci + 1).every(x => x.t === "sep")) { w.ci++; w.buf = ""; }
+    }
+    if (jpDone(w)) completeWord(w);
+  } else { if (/[a-z]/.test(expected)) keyMiss[expected] = (keyMiss[expected] || 0) + 1; combo = 0; shake = 4; }
+}
+function completeWord(w) {
+  const len = (w._jp ? w.typed.replace(/ /g, "").length : w.typed.length);
+  score += 100 + len * 10 + combo * 5; cleared++;
+  for (let i = 0; i < 16; i++) pops.push({ x: w.x, y: w.y, vx: (Math.random() - 0.5) * 7, vy: (Math.random() - 0.7) * 7, life: 1, c: CAP_COLORS[w.hue] });
+  words = words.filter(x => x !== w); active = null;
 }
 
 // ===== ボタン矩形 =====
@@ -520,12 +614,17 @@ function wrapTypedChars(typed, maxW, charW) {
   if (line.length) lines.push(line);
   return lines;
 }
-function drawSentence(w) {
-  const single = w.native === w.typed;
+function drawItem(w) {
+  const jp = !!w._jp;
+  const single = !jp && w.native === w.typed;          // en: 1行
+  const guide = w.typed;                                // 下段に出すローマ字/ピンイン/英単語
+  const matched = jp ? jpMatched(w) : w.matched;
+  const spaceBar = !jp;                                 // 日本語のスペースは打たない(すき間だけ)
+  const nativeText = single ? null : w.native;
   const bigN = clamp(22 * unit, 15, 28), sub = clamp(19 * unit, 13, 24), maxW = W * 0.84;
   ctx.font = `bold ${sub}px monospace`; const charW = ctx.measureText("m").width;
-  const tLines = wrapTypedChars(w.typed, maxW, charW);
-  let nLines = []; if (!single) { ctx.font = `bold ${bigN}px sans-serif`; nLines = wrapByMeasure(w.native, maxW); }
+  const tLines = wrapTypedChars(guide, maxW, charW);
+  let nLines = []; if (nativeText) { ctx.font = `bold ${bigN}px sans-serif`; nLines = wrapByMeasure(nativeText, maxW); }
   const lineHn = bigN * 1.3, lineHt = sub * 1.5;
   let contentW = 0; ctx.font = `bold ${bigN}px sans-serif`;
   for (const l of nLines) contentW = Math.max(contentW, ctx.measureText(l).width);
@@ -535,7 +634,7 @@ function drawSentence(w) {
   const capH = contentH + 18 * unit;
   const cx = clamp(w.x, capW / 2 + 4, W - capW / 2 - 4), cy = w.y;
   roundRect(cx - capW / 2, cy - capH / 2, capW, capH, 16 * unit); ctx.fillStyle = CAP_COLORS[w.hue]; ctx.fill();
-  ctx.lineWidth = active === w ? 4 * unit : 2.5 * unit; ctx.strokeStyle = active === w ? "#ff5e93" : "rgba(255,255,255,0.9)"; ctx.stroke();
+  ctx.lineWidth = active === w ? 4 * unit : 2 * unit; ctx.strokeStyle = active === w ? "#ff5e93" : "rgba(255,255,255,0.85)"; ctx.stroke();
   let y = cy - contentH / 2; ctx.textBaseline = "middle";
   ctx.font = `bold ${bigN}px sans-serif`; ctx.fillStyle = "#7a4458"; ctx.textAlign = "center";
   for (const l of nLines) { ctx.fillText(l, cx, y + lineHn / 2); y += lineHn; }
@@ -544,34 +643,13 @@ function drawSentence(w) {
   for (const l of tLines) {
     const lw = l.length * charW; let x = cx - lw / 2; const ly = y + lineHt / 2;
     for (const c of l) {
-      const done = c.gi < w.matched;
-      if (c.ch === " ") { const mw = charW * 0.62, mh = Math.max(2.5, 3 * unit); ctx.fillStyle = done ? "#ff3d7f" : "rgba(154,125,139,0.5)"; roundRect(x + (charW - mw) / 2, ly + sub * 0.26, mw, mh, mh / 2); ctx.fill(); }
+      const done = c.gi < matched;
+      if (c.ch === " ") { if (spaceBar) { const mw = charW * 0.62, mh = Math.max(2.5, 3 * unit); ctx.fillStyle = done ? "#ff3d7f" : "rgba(154,125,139,0.5)"; roundRect(x + (charW - mw) / 2, ly + sub * 0.26, mw, mh, mh / 2); ctx.fill(); } }
       else { ctx.fillStyle = done ? "#ff3d7f" : "#9a7d8b"; ctx.fillText(c.ch, x, ly); }
       x += charW;
     }
     y += lineHt;
   }
-  ctx.textAlign = "center";
-}
-function drawWord(w) {
-  if (w.sentence) return drawSentence(w);
-  const isActive = active === w, single = w.native === w.typed;
-  const bigSize = clamp(30 * unit, 18, 40), subSize = clamp(20 * unit, 13, 26);
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.font = `bold ${bigSize}px sans-serif`; const nativeW = ctx.measureText(w.native).width;
-  ctx.font = `bold ${subSize}px monospace`; const typedW = ctx.measureText(w.typed).width;
-  const capW = Math.max(nativeW, typedW) + 34 * unit;
-  const capH = (single ? bigSize * 1.6 : bigSize * 1.5 + subSize * 1.3) + 10 * unit;
-  const cx = clamp(w.x, capW / 2 + 4, W - capW / 2 - 4), cy = w.y;
-  roundRect(cx - capW / 2, cy - capH / 2, capW, capH, 16 * unit); ctx.fillStyle = CAP_COLORS[w.hue]; ctx.fill();
-  ctx.lineWidth = isActive ? 4 * unit : 2 * unit; ctx.strokeStyle = isActive ? "#ff5e93" : "rgba(255,255,255,0.85)"; ctx.stroke();
-  if (single) drawTypedLine(w, cx, cy, bigSize);
-  else { ctx.font = `bold ${bigSize}px sans-serif`; ctx.fillStyle = "#7a4458"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(w.native, cx, cy - subSize * 0.55); drawTypedLine(w, cx, cy + bigSize * 0.55, subSize); }
-}
-function drawTypedLine(w, cx, cy, size) {
-  ctx.font = `bold ${size}px monospace`; ctx.textBaseline = "middle";
-  const full = w.typed, totalW = ctx.measureText(full).width; let x = cx - totalW / 2; ctx.textAlign = "left";
-  for (let i = 0; i < full.length; i++) { ctx.fillStyle = i < w.matched ? "#ff3d7f" : "#9a7d8b"; ctx.fillText(full[i], x, cy); x += ctx.measureText(full[i]).width; }
   ctx.textAlign = "center";
 }
 function drawHUD() {
@@ -688,7 +766,7 @@ function draw() {
 
   // PLAY / PAUSE / OVER
   if (format === "game") { ctx.save(); ctx.setLineDash([10, 8]); ctx.strokeStyle = "rgba(255,120,150,0.5)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, bottomLine); ctx.lineTo(W, bottomLine); ctx.stroke(); ctx.restore(); }
-  words.forEach(drawWord);
+  words.forEach(drawItem);
   for (const p of pops) { ctx.globalAlpha = Math.max(0, p.life); ctx.fillStyle = p.c; ctx.beginPath(); ctx.arc(p.x, p.y, 5 * unit, 0, Math.PI * 2); ctx.fill(); }
   ctx.globalAlpha = 1;
   drawHUD();
