@@ -249,9 +249,10 @@ function resize() {
 const STATE = { LANG: 0, COURSE: 1, FORMAT: 2, PLAY: 3, PAUSE: 4, OVER: 5 };
 let state = STATE.LANG;
 let selLang = "en", chosen = null, format = "game", kind = "word", cfg = null;
-let words, active, spawnT, lives, score, combo, maxCombo, cleared, totalKeys, correctKeys, frame, startFrame, pops, shake, overAt, endedManually, pqueue;
+let words, active, spawnT, lives, score, combo, maxCombo, cleared, totalKeys, correctKeys, frame, startFrame, pops, shake, overAt, endedManually, pqueue, keyMiss, keyAttempt;
 let best = Number(localStorage.getItem("typingBest") || 0);
-words = []; pops = []; frame = 0; shake = 0; pqueue = [];
+let allKeyStats = (function () { try { return JSON.parse(localStorage.getItem("typingKeyStats")) || { miss: {}, att: {} }; } catch (e) { return { miss: {}, att: {} }; } })();
+words = []; pops = []; frame = 0; shake = 0; pqueue = []; keyMiss = {}; keyAttempt = {};
 const isTouch = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
 
 function courseList(l) {
@@ -284,6 +285,7 @@ function start() {
   lives = cfg.lives;
   words = []; pops = []; active = null; pqueue = [];
   score = 0; combo = 0; maxCombo = 0; cleared = 0; totalKeys = 0; correctKeys = 0; endedManually = false;
+  keyMiss = {}; keyAttempt = {};
   spawnT = 30; startFrame = frame;
   state = STATE.PLAY;
   if (isTouch) { try { kb.focus(); } catch (e) {} }
@@ -292,7 +294,16 @@ function resume() { state = STATE.PLAY; if (isTouch) { try { kb.focus(); } catch
 function gameOver(manual) {
   endedManually = !!manual; state = STATE.OVER; overAt = frame;
   if (score > best) { best = score; localStorage.setItem("typingBest", best); }
+  for (const k in keyMiss) allKeyStats.miss[k] = (allKeyStats.miss[k] || 0) + keyMiss[k];
+  for (const k in keyAttempt) allKeyStats.att[k] = (allKeyStats.att[k] || 0) + keyAttempt[k];
+  try { localStorage.setItem("typingKeyStats", JSON.stringify(allKeyStats)); } catch (e) {}
   try { kb.blur(); } catch (e) {}
+}
+function weakKeys(stats, n) {
+  const arr = [];
+  for (const k in stats.miss) if (stats.miss[k] > 0) arr.push({ k, miss: stats.miss[k], att: stats.att[k] || stats.miss[k] });
+  arr.sort((a, b) => b.miss - a.miss || (b.miss / b.att - a.miss / a.att));
+  return arr.slice(0, n);
 }
 function elapsedSec() { return Math.max(0, (frame - startFrame) / 60); }
 function accuracy() { return totalKeys ? Math.round(correctKeys / totalKeys * 100) : 100; }
@@ -312,9 +323,11 @@ function handleChar(ch) {
     else { combo = 0; shake = 4; }
     return;
   }
+  const expected = active.typed[active.matched];
+  if (/[a-z]/.test(expected)) keyAttempt[expected] = (keyAttempt[expected] || 0) + 1;
   totalKeys++;
-  if (active.typed[active.matched] === ch) { active.matched++; correctKeys++; combo++; maxCombo = Math.max(maxCombo, combo); checkComplete(); }
-  else { combo = 0; shake = 4; }
+  if (expected === ch) { active.matched++; correctKeys++; combo++; maxCombo = Math.max(maxCombo, combo); checkComplete(); }
+  else { if (/[a-z]/.test(expected)) keyMiss[expected] = (keyMiss[expected] || 0) + 1; combo = 0; shake = 4; }
 }
 function checkComplete() {
   if (active.matched >= active.typed.length) {
@@ -595,12 +608,25 @@ function draw() {
   }
   if (state === STATE.OVER) {
     ctx.fillStyle = "rgba(120,60,90,0.5)"; ctx.fillRect(0, 0, W, H);
-    text(endedManually ? "おつかれさま！" : "おしまい！", H * 0.3, clamp(40 * unit, 26, 50), "#fff");
-    text("スコア " + score, H * 0.41, clamp(26 * unit, 18, 30), "#fff");
-    text("クリア " + cleared + "  /  せいかく " + accuracy() + "%  /  WPM " + wpm(), H * 0.48, clamp(16 * unit, 12, 20), "#fff3b0");
-    text("最大コンボ " + maxCombo + "  /  " + (chosen ? chosen.label : "") + "（" + (format === "game" ? "ゲーム" : "れんしゅう") + "）", H * 0.54, clamp(15 * unit, 11, 19), "#fff3b0");
-    text("ベスト " + best, H * 0.6, clamp(18 * unit, 13, 22), "#fff3b0");
-    text("タップ / Space でメニューへ", H * 0.69, clamp(18 * unit, 13, 22), "#fff");
+    text(endedManually ? "おつかれさま！" : "おしまい！", H * 0.24, clamp(38 * unit, 24, 48), "#fff");
+    text("スコア " + score + "  /  ベスト " + best, H * 0.33, clamp(22 * unit, 16, 28), "#fff");
+    text("クリア " + cleared + "  /  せいかく " + accuracy() + "%  /  WPM " + wpm(), H * 0.39, clamp(16 * unit, 12, 20), "#fff3b0");
+    text("最大コンボ " + maxCombo + "  /  " + (chosen ? chosen.label : "") + "（" + (format === "game" ? "ゲーム" : "れんしゅう") + "）", H * 0.44, clamp(14 * unit, 10, 18), "#fff3b0");
+    // にがてキー(累計)
+    const wk = weakKeys(allKeyStats, 6);
+    text("にがてキー（これまでの合計）", H * 0.52, clamp(16 * unit, 12, 20), "#fff");
+    if (!wk.length) { text("まだ なし！ かんぺき ✨", H * 0.59, clamp(18 * unit, 13, 22), "#fff3b0"); }
+    else {
+      const cw = clamp(54 * unit, 40, 66), gap = 10 * unit, cy0 = H * 0.55;
+      const total = wk.length * cw + (wk.length - 1) * gap; let cxs = (W - total) / 2;
+      for (const it of wk) {
+        roundRect(cxs, cy0, cw, cw, 12 * unit); ctx.fillStyle = "rgba(255,255,255,0.92)"; ctx.fill();
+        text(it.k, cy0 + cw * 0.46, clamp(26 * unit, 18, 32), "#ff3d7f", "center", cxs + cw / 2);
+        text("×" + it.miss, cy0 + cw * 0.82, clamp(13 * unit, 9, 16), "#a8436b", "center", cxs + cw / 2);
+        cxs += cw + gap;
+      }
+    }
+    text("タップ / Space でメニューへ", H * 0.74, clamp(18 * unit, 13, 22), "#fff");
   }
   ctx.restore();
 }
