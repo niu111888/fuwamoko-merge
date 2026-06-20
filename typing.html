@@ -309,6 +309,8 @@ function makeItem(src, sentence) {
     while (it.tokens[it.ci] && it.tokens[it.ci].t === "sep") it.ci++;
     it.firstChars = new Set();
     const t0 = it.tokens[it.ci]; if (t0) for (const a of t0.alts) it.firstChars.add(a[0]);
+  } else if (/[一-鿿]/.test(src.native)) { // 中国語: スペースは自動(連続入力OK)
+    it.freeSpace = true;
   }
   return it;
 }
@@ -318,7 +320,10 @@ const VOW = "aiueo";
 const isVow = c => VOW.indexOf(c) >= 0;
 const isCons = c => /[a-z]/.test(c) && !isVow(c);
 const SYL_ALTS = {
-  shi: ["shi", "si"], chi: ["chi", "ti"], tsu: ["tsu", "tu"], fu: ["fu", "hu"], ji: ["ji", "zi"],
+  shi: ["shi", "si"], chi: ["chi", "ti"], tsu: ["tsu", "tu"], fu: ["fu", "hu"],
+  ji: ["ji", "zi", "di"], zi: ["zi", "ji"], zu: ["zu", "du"], di: ["di", "ji"], du: ["du", "zu"], // じ/ぢ/ず/づ
+  vu: ["vu", "bu"], va: ["va"], vi: ["vi"], ve: ["ve"], vo: ["vo"],                              // ヴ
+  fa: ["fa"], fi: ["fi"], fe: ["fe"], fo: ["fo"], we: ["we"], wi: ["wi"],
   sha: ["sha", "sya", "shixya", "shilya", "sixya", "silya"], shu: ["shu", "syu", "shyu", "shixyu", "shilyu", "sixyu", "silyu"], sho: ["sho", "syo", "shyo", "shixyo", "shilyo", "sixyo", "silyo"],
   cha: ["cha", "tya", "cya", "chixya", "chilya", "tixya", "tilya"], chu: ["chu", "tyu", "cyu", "chixyu", "chilyu", "tixyu", "tilyu"], cho: ["cho", "tyo", "cyo", "chixyo", "chilyo", "tixyo", "tilyo"],
   ja: ["ja", "jya", "zya", "jixya", "jilya", "zixya", "zilya"], ju: ["ju", "jyu", "zyu", "jixyu", "jilyu", "zixyu", "zilyu"], jo: ["jo", "jyo", "zyo", "jixyo", "jilyo", "zixyo", "zilyo"],
@@ -414,14 +419,19 @@ function handleChar(ch) {
   }
   feedActive(ch);
 }
+function skipSpaces(w) { while (w.typed[w.matched] === " ") w.matched++; }
 function feedActive(ch) {
   const w = active;
   if (w._jp) return feedJP(w, ch);
+  if (w.freeSpace) skipSpaces(w);   // 中国語: スペースは打たなくてよい
   const expected = w.typed[w.matched];
   if (/[a-z]/.test(expected)) keyAttempt[expected] = (keyAttempt[expected] || 0) + 1;
   totalKeys++;
-  if (expected === ch) { w.matched++; correctKeys++; combo++; maxCombo = Math.max(maxCombo, combo); if (w.matched >= w.typed.length) completeWord(w); }
-  else { if (/[a-z]/.test(expected)) keyMiss[expected] = (keyMiss[expected] || 0) + 1; combo = 0; shake = 4; }
+  if (expected === ch) {
+    w.matched++; correctKeys++; combo++; maxCombo = Math.max(maxCombo, combo);
+    if (w.freeSpace) skipSpaces(w);
+    if (w.matched >= w.typed.length) completeWord(w);
+  } else { if (/[a-z]/.test(expected)) keyMiss[expected] = (keyMiss[expected] || 0) + 1; combo = 0; shake = 4; }
 }
 function feedJP(w, ch) {
   jpSkipSep(w);
@@ -453,7 +463,7 @@ function feedJP(w, ch) {
   } else { if (/[a-z]/.test(expected)) keyMiss[expected] = (keyMiss[expected] || 0) + 1; combo = 0; shake = 4; }
 }
 function completeWord(w) {
-  const len = (w._jp ? w.typed.replace(/ /g, "").length : w.typed.length);
+  const len = ((w._jp || w.freeSpace) ? w.typed.replace(/ /g, "").length : w.typed.length);
   score += 100 + len * 10 + combo * 5; cleared++;
   for (let i = 0; i < 16; i++) pops.push({ x: w.x, y: w.y, vx: (Math.random() - 0.5) * 7, vy: (Math.random() - 0.7) * 7, life: 1, c: CAP_COLORS[w.hue] });
   words = words.filter(x => x !== w); active = null;
@@ -619,7 +629,7 @@ function drawItem(w) {
   const single = !jp && w.native === w.typed;          // en: 1行
   const guide = w.typed;                                // 下段に出すローマ字/ピンイン/英単語
   const matched = jp ? jpMatched(w) : w.matched;
-  const spaceBar = !jp;                                 // 日本語のスペースは打たない(すき間だけ)
+  const spaceBar = !jp && !w.freeSpace;                 // 日本語/中国語のスペースは打たない(すき間だけ)
   const nativeText = single ? null : w.native;
   const bigN = clamp(22 * unit, 15, 28), sub = clamp(19 * unit, 13, 24), maxW = W * 0.84;
   ctx.font = `bold ${sub}px monospace`; const charW = ctx.measureText("m").width;
