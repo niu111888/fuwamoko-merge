@@ -258,6 +258,7 @@ let selLang = "en", chosen = null, format = "game", kind = "word", cfg = null;
 let words, active, spawnT, lives, score, combo, maxCombo, cleared, totalKeys, correctKeys, frame, startFrame, pops, shake, overAt, endedManually, pqueue, keyMiss, keyAttempt;
 let best = Number(localStorage.getItem("typingBest") || 0);
 let allKeyStats = (function () { try { return JSON.parse(localStorage.getItem("typingKeyStats")) || { miss: {}, att: {} }; } catch (e) { return { miss: {}, att: {} }; } })();
+let showRomaji = localStorage.getItem("typingRomaji") !== "0"; // ローマ字/ピンインのガイド表示
 words = []; pops = []; frame = 0; shake = 0; pqueue = []; keyMiss = {}; keyAttempt = {};
 const isTouch = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
 
@@ -501,6 +502,7 @@ function backRect() { const w = clamp(96 * unit, 70, 120), h = clamp(36 * unit, 
 function statsBtnRect() { const w = clamp(W * 0.62, 200, 340), h = clamp(40 * unit, 32, 52); return { x: (W - w) / 2, y: H * 0.8, w, h }; }
 function weakStartRect() { const w = clamp(W * 0.66, 210, 380), h = clamp(50 * unit, 40, 64); return { x: (W - w) / 2, y: H * 0.74, w, h }; }
 function resetRect() { const w = clamp(W * 0.42, 150, 240), h = clamp(38 * unit, 30, 50); return { x: (W - w) / 2, y: H * 0.86, w, h }; }
+function formatToggleRect() { const c = formatCards()[1]; const w = clamp(W * 0.66, 210, 380), h = clamp(42 * unit, 34, 54); return { x: (W - w) / 2, y: c.y + c.h + 16 * unit, w, h }; }
 function quitRect() { const w = clamp(96 * unit, 72, 116), h = clamp(36 * unit, 28, 46); return { x: W - w - 14, y: 14, w, h }; }
 function pauseResumeRect() { const w = clamp(W * 0.5, 180, 300), h = clamp(56 * unit, 44, 70); return { x: (W - w) / 2, y: H * 0.44, w, h }; }
 function pauseEndRect() { const w = clamp(W * 0.5, 180, 300), h = clamp(56 * unit, 44, 70); return { x: (W - w) / 2, y: H * 0.44 + clamp(56 * unit, 44, 70) + 18 * unit, w, h }; }
@@ -510,7 +512,7 @@ function tap(x, y) {
   if (state === STATE.LANG) { if (inRect(statsBtnRect(), x, y)) { state = STATE.STATS; return; } const c = hit(langCards(), x, y); if (c) { selLang = c.lang; state = STATE.COURSE; } return; }
   if (state === STATE.STATS) { if (inRect(backRect(), x, y)) { state = STATE.LANG; return; } if (inRect(weakStartRect(), x, y)) { startWeak(); return; } if (inRect(resetRect(), x, y)) { allKeyStats = { miss: {}, att: {} }; try { localStorage.removeItem("typingKeyStats"); } catch (e) {} return; } return; }
   if (state === STATE.COURSE) { if (inRect(backRect(), x, y)) { state = STATE.LANG; return; } const c = hit(courseCards(), x, y); if (c) { chosen = c.item; state = STATE.FORMAT; } return; }
-  if (state === STATE.FORMAT) { if (inRect(backRect(), x, y)) { state = STATE.COURSE; return; } const c = hit(formatCards(), x, y); if (c) { chosen._fmt = c.fmt; start(); } return; }
+  if (state === STATE.FORMAT) { if (inRect(backRect(), x, y)) { state = STATE.COURSE; return; } if (inRect(formatToggleRect(), x, y)) { showRomaji = !showRomaji; try { localStorage.setItem("typingRomaji", showRomaji ? "1" : "0"); } catch (e) {} return; } const c = hit(formatCards(), x, y); if (c) { chosen._fmt = c.fmt; start(); } return; }
   if (state === STATE.PLAY) { if (inRect(quitRect(), x, y)) { state = STATE.PAUSE; try { kb.blur(); } catch (e) {} } return; }
   if (state === STATE.PAUSE) { if (inRect(pauseResumeRect(), x, y)) resume(); else if (inRect(pauseEndRect(), x, y)) gameOver(true); return; }
   if (state === STATE.OVER) { if (frame - overAt > 24) state = STATE.LANG; }
@@ -537,6 +539,7 @@ window.addEventListener("keydown", e => {
   if (state === STATE.FORMAT) {
     if (e.code === "Escape" || e.code === "Backspace") { e.preventDefault(); state = STATE.COURSE; return; }
     if (e.code === "Digit1") { chosen._fmt = "game"; start(); } else if (e.code === "Digit2") { chosen._fmt = "practice"; start(); }
+    else if (e.code === "KeyR") { showRomaji = !showRomaji; try { localStorage.setItem("typingRomaji", showRomaji ? "1" : "0"); } catch (e2) {} }
     return;
   }
   if (state === STATE.PAUSE) { if (e.code === "Space" || e.code === "Enter" || e.code === "Escape") { e.preventDefault(); resume(); } return; }
@@ -626,21 +629,25 @@ function wrapTypedChars(typed, maxW, charW) {
 }
 function drawItem(w) {
   const jp = !!w._jp;
-  const single = !jp && w.native === w.typed;          // en: 1行
-  const guide = w.typed;                                // 下段に出すローマ字/ピンイン/英単語
+  const single = !jp && w.native === w.typed;          // en: 1行(単語そのもの)
+  const guide = w.typed;                                // 下段: ローマ字/ピンイン/英単語
   const matched = jp ? jpMatched(w) : w.matched;
-  const spaceBar = !jp && !w.freeSpace;                 // 日本語/中国語のスペースは打たない(すき間だけ)
+  const spaceBar = !jp && !w.freeSpace;                 // 英語のスペースのみ目印。日本語/中国語は細いすき間
+  const showGuide = single ? true : showRomaji;         // 英語は常に表示。日中はトグルで表示/非表示
   const nativeText = single ? null : w.native;
   const bigN = clamp(22 * unit, 15, 28), sub = clamp(19 * unit, 13, 24), maxW = W * 0.84;
   ctx.font = `bold ${sub}px monospace`; const charW = ctx.measureText("m").width;
-  const tLines = wrapTypedChars(guide, maxW, charW);
+  const spaceW = spaceBar ? charW : charW * 0.4;        // 打たないスペースは狭く
+  const cwOf = ch => ch === " " ? spaceW : charW;
+  const lineW = line => line.reduce((s, c) => s + cwOf(c.ch), 0);
+  const tLines = showGuide ? wrapTypedChars(guide, maxW, charW) : [];
   let nLines = []; if (nativeText) { ctx.font = `bold ${bigN}px sans-serif`; nLines = wrapByMeasure(nativeText, maxW); }
   const lineHn = bigN * 1.3, lineHt = sub * 1.5;
   let contentW = 0; ctx.font = `bold ${bigN}px sans-serif`;
   for (const l of nLines) contentW = Math.max(contentW, ctx.measureText(l).width);
-  for (const l of tLines) contentW = Math.max(contentW, l.length * charW);
+  for (const l of tLines) contentW = Math.max(contentW, lineW(l));
   const capW = Math.min(W * 0.94, contentW + 30 * unit);
-  const contentH = nLines.length * lineHn + (nLines.length ? 6 * unit : 0) + tLines.length * lineHt;
+  const contentH = nLines.length * lineHn + (nLines.length && tLines.length ? 6 * unit : 0) + tLines.length * lineHt;
   const capH = contentH + 18 * unit;
   const cx = clamp(w.x, capW / 2 + 4, W - capW / 2 - 4), cy = w.y;
   roundRect(cx - capW / 2, cy - capH / 2, capW, capH, 16 * unit); ctx.fillStyle = CAP_COLORS[w.hue]; ctx.fill();
@@ -648,15 +655,15 @@ function drawItem(w) {
   let y = cy - contentH / 2; ctx.textBaseline = "middle";
   ctx.font = `bold ${bigN}px sans-serif`; ctx.fillStyle = "#7a4458"; ctx.textAlign = "center";
   for (const l of nLines) { ctx.fillText(l, cx, y + lineHn / 2); y += lineHn; }
-  if (nLines.length) y += 6 * unit;
+  if (nLines.length && tLines.length) y += 6 * unit;
   ctx.font = `bold ${sub}px monospace`; ctx.textAlign = "left";
   for (const l of tLines) {
-    const lw = l.length * charW; let x = cx - lw / 2; const ly = y + lineHt / 2;
+    let x = cx - lineW(l) / 2; const ly = y + lineHt / 2;
     for (const c of l) {
       const done = c.gi < matched;
       if (c.ch === " ") { if (spaceBar) { const mw = charW * 0.62, mh = Math.max(2.5, 3 * unit); ctx.fillStyle = done ? "#ff3d7f" : "rgba(154,125,139,0.5)"; roundRect(x + (charW - mw) / 2, ly + sub * 0.26, mw, mh, mh / 2); ctx.fill(); } }
       else { ctx.fillStyle = done ? "#ff3d7f" : "#9a7d8b"; ctx.fillText(c.ch, x, ly); }
-      x += charW;
+      x += cwOf(c.ch);
     }
     y += lineHt;
   }
@@ -770,7 +777,8 @@ function draw() {
     const cards = formatCards();
     card(cards[0], CAP_COLORS[3], cards[0].label, cards[0].sub, true);
     card(cards[1], CAP_COLORS[2], cards[1].label, cards[1].sub, true);
-    text("（1=ゲーム 2=れんしゅう・Escでもどる）", H * 0.9, clamp(14 * unit, 10, 17), "#a8436b");
+    pill(formatToggleRect(), showRomaji ? "#ffd9ec" : "rgba(255,255,255,0.85)", "#ff8fb5", "ローマ字ガイド：" + (showRomaji ? "あり" : "なし（むずかしい）"), "#c14b76");
+    text("（1=ゲーム 2=れんしゅう・R=ローマ字切替・Escでもどる）", H * 0.93, clamp(13 * unit, 9, 16), "#a8436b");
     ctx.restore(); return;
   }
 
