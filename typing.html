@@ -203,6 +203,36 @@ const COURSE_DATA = {
     { native: "つき あかり が ゆき の のはら を あおく そめた", typed: "tsuki akari ga yuki no nohara o aoku someta", hint: "The moonlight dyed the snowy field pale blue" },
     { native: "とき が ゆっくり と ながれる ふるい まち の かど で", typed: "toki ga yukkuri to nagareru furui machi no kado de", hint: "At a corner of the old town where time flows slow" },
   ],
+  en_movie: [
+    { native: "may the force be with you", typed: "may the force be with you", hint: "スター・ウォーズ" },
+    { native: "to infinity and beyond", typed: "to infinity and beyond", hint: "トイ・ストーリー" },
+    { native: "why so serious", typed: "why so serious", hint: "ダークナイト" },
+    { native: "i see dead people", typed: "i see dead people", hint: "シックス・センス" },
+    { native: "houston we have a problem", typed: "houston we have a problem", hint: "アポロ13" },
+    { native: "show me the money", typed: "show me the money", hint: "ザ・エージェント" },
+    { native: "hasta la vista baby", typed: "hasta la vista baby", hint: "ターミネーター2" },
+    { native: "run forrest run", typed: "run forrest run", hint: "フォレスト・ガンプ" },
+  ],
+  zh_movie: [
+    { native: "愿原力与你同在", typed: "yuan yuan li yu ni tong zai", hint: "スター・ウォーズ" },
+    { native: "我会回来的", typed: "wo hui hui lai de", hint: "ターミネーター" },
+    { native: "你跳我也跳", typed: "ni tiao wo ye tiao", hint: "タイタニック" },
+    { native: "人生就像一盒巧克力", typed: "ren sheng jiu xiang yi he qiao ke li", hint: "フォレスト・ガンプ" },
+    { native: "我命由我不由天", typed: "wo ming you wo bu you tian", hint: "ナタ 魔童降世" },
+    { native: "做人如果没有梦想", typed: "zuo ren ru guo mei you meng xiang", hint: "少林サッカー" },
+    { native: "让子弹飞一会儿", typed: "rang zi dan fei yi hui er", hint: "さらば復讐の狼たちよ" },
+    { native: "我想做个好人", typed: "wo xiang zuo ge hao ren", hint: "インファナル・アフェア" },
+  ],
+  ja_movie: [
+    { native: "きみ の ひとみ に かんぱい", typed: "kimi no hitomi ni kanpai", hint: "カサブランカ" },
+    { native: "ばるす", typed: "barusu", hint: "天空の城ラピュタ" },
+    { native: "まっくろくろすけ でておいで", typed: "makkurokurosuke deteoide", hint: "となりのトトロ" },
+    { native: "いきろ", typed: "ikiro", hint: "もののけ姫" },
+    { native: "ここ で はたらかせて ください", typed: "koko de hatarakasete kudasai", hint: "千と千尋の神隠し" },
+    { native: "しんじつ は いつも ひとつ", typed: "shinjitsu wa itsumo hitotsu", hint: "名探偵コナン" },
+    { native: "せかい は おれ の もの だ", typed: "sekai wa ore no mono da", hint: "タイタニック" },
+    { native: "にげちゃ だめ だ", typed: "nigecha dame da", hint: "エヴァンゲリオン" },
+  ],
 };
 const COURSES = {
   en: [
@@ -211,6 +241,7 @@ const COURSES = {
     { id: "en_toeic3", label: "TOEIC むずかしい", sub: "~800・長め" },
     { id: "en_business", label: "ビジネス英語", sub: "仕事の英文" },
     { id: "en_novel", label: "小説・物語", sub: "英語の物語文" },
+    { id: "en_movie", label: "映画の名セリフ", sub: "有名な一言・🎧おすすめ" },
   ],
   zh: [
     { id: "zh_hsk12", label: "HSK 1-2", sub: "やさしい中国語" },
@@ -218,12 +249,14 @@ const COURSES = {
     { id: "zh_hsk56", label: "HSK 5-6", sub: "むずかしい・長め" },
     { id: "zh_business", label: "ビジネス中国語", sub: "仕事の中国語" },
     { id: "zh_novel", label: "小説・物語", sub: "中国語の物語文" },
+    { id: "zh_movie", label: "映画の名セリフ", sub: "有名な一言・🎧おすすめ" },
   ],
   ja: [
     { id: "ja_easy", label: "やさしい", sub: "かんたんな文" },
     { id: "ja_normal", label: "ふつう", sub: "ふつうの文" },
     { id: "ja_business", label: "ビジネス", sub: "敬語・仕事の文" },
     { id: "ja_novel", label: "小説・物語", sub: "物語の文" },
+    { id: "ja_movie", label: "えいが の めいセリフ", sub: "有名な一言・🎧おすすめ" },
   ],
 };
 const WORD_TIERS = [
@@ -259,6 +292,18 @@ let words, active, spawnT, lives, score, combo, maxCombo, cleared, totalKeys, co
 let best = Number(localStorage.getItem("typingBest") || 0);
 let allKeyStats = (function () { try { return JSON.parse(localStorage.getItem("typingKeyStats")) || { miss: {}, att: {} }; } catch (e) { return { miss: {}, att: {} }; } })();
 let showRomaji = localStorage.getItem("typingRomaji") !== "0"; // ローマ字/ピンインのガイド表示
+let lastSubtitle = null, subtitleT = 0, revealedAnswer = false;   // きいて打つ: 字幕演出
+
+// ===== 音声読み上げ(きいて打つ) =====
+function speakItem(it) {
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(it.native);
+    u.lang = it._jp ? "ja-JP" : (it.freeSpace ? "zh-CN" : "en-US");
+    u.rate = 0.85;
+    speechSynthesis.speak(u);
+  } catch (e) {}
+}
 words = []; pops = []; frame = 0; shake = 0; pqueue = []; keyMiss = {}; keyAttempt = {};
 const isTouch = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
 
@@ -382,6 +427,7 @@ function start() {
   words = []; pops = []; active = null; pqueue = [];
   score = 0; combo = 0; maxCombo = 0; cleared = 0; totalKeys = 0; correctKeys = 0; endedManually = false;
   keyMiss = {}; keyAttempt = {};
+  lastSubtitle = null; subtitleT = 0; revealedAnswer = false;
   spawnT = 30; startFrame = frame;
   state = STATE.PLAY;
   if (isTouch) { try { kb.focus(); } catch (e) {} }
@@ -468,6 +514,14 @@ function completeWord(w) {
   score += 100 + len * 10 + combo * 5; cleared++;
   for (let i = 0; i < 16; i++) pops.push({ x: w.x, y: w.y, vx: (Math.random() - 0.5) * 7, vy: (Math.random() - 0.7) * 7, life: 1, c: CAP_COLORS[w.hue] });
   words = words.filter(x => x !== w); active = null;
+  if (format === "listen") { lastSubtitle = w; revealedAnswer = false; subtitleT = 110; }
+}
+function revealAnswer() { // きいて打つ: こたえを見る(スキップ扱い)
+  if (!words.length) return;
+  const w = words[0];
+  try { speechSynthesis.cancel(); } catch (e) {}
+  words = []; active = null; combo = 0;
+  lastSubtitle = w; revealedAnswer = true; subtitleT = 150;
 }
 
 // ===== ボタン矩形 =====
@@ -491,18 +545,21 @@ function courseCards() {
   return cards;
 }
 function formatCards() {
-  const cw = clamp(W * 0.62, 200, 430), ch = clamp(H * 0.16, 84, 150), gy = 18 * unit;
-  const x0 = (W - cw) / 2, y0 = H * 0.38;
+  const cw = clamp(W * 0.62, 200, 430), ch = clamp(H * 0.115, 62, 110), gy = 14 * unit;
+  const x0 = (W - cw) / 2, y0 = H * 0.32;
   return [
     { fmt: "game", x: x0, y: y0, w: cw, h: ch, label: "🎮 ゲーム", sub: "落ちてくる・ライフあり" },
     { fmt: "practice", x: x0, y: y0 + ch + gy, w: cw, h: ch, label: "✍️ れんしゅう", sub: "自分のペース・失敗なし" },
+    { fmt: "listen", x: x0, y: y0 + (ch + gy) * 2, w: cw, h: ch, label: "🎧 きいて打つ", sub: "音声だけで書き取り→字幕が出る" },
   ];
 }
 function backRect() { const w = clamp(96 * unit, 70, 120), h = clamp(36 * unit, 28, 46); return { x: 16, y: 16, w, h }; }
 function statsBtnRect() { const w = clamp(W * 0.62, 200, 340), h = clamp(40 * unit, 32, 52); return { x: (W - w) / 2, y: H * 0.8, w, h }; }
 function weakStartRect() { const w = clamp(W * 0.66, 210, 380), h = clamp(50 * unit, 40, 64); return { x: (W - w) / 2, y: H * 0.74, w, h }; }
 function resetRect() { const w = clamp(W * 0.42, 150, 240), h = clamp(38 * unit, 30, 50); return { x: (W - w) / 2, y: H * 0.86, w, h }; }
-function formatToggleRect() { const c = formatCards()[1]; const w = clamp(W * 0.66, 210, 380), h = clamp(42 * unit, 34, 54); return { x: (W - w) / 2, y: c.y + c.h + 16 * unit, w, h }; }
+function formatToggleRect() { const c = formatCards()[2]; const w = clamp(W * 0.66, 210, 380), h = clamp(42 * unit, 34, 54); return { x: (W - w) / 2, y: c.y + c.h + 16 * unit, w, h }; }
+function listenReplayRect() { const w = clamp(W * 0.34, 130, 220), h = clamp(46 * unit, 38, 58); return { x: W / 2 - w - 8 * unit, y: H * 0.7, w, h }; }
+function listenAnswerRect() { const w = clamp(W * 0.34, 130, 220), h = clamp(46 * unit, 38, 58); return { x: W / 2 + 8 * unit, y: H * 0.7, w, h }; }
 function quitRect() { const w = clamp(96 * unit, 72, 116), h = clamp(36 * unit, 28, 46); return { x: W - w - 14, y: 14, w, h }; }
 function pauseResumeRect() { const w = clamp(W * 0.5, 180, 300), h = clamp(56 * unit, 44, 70); return { x: (W - w) / 2, y: H * 0.44, w, h }; }
 function pauseEndRect() { const w = clamp(W * 0.5, 180, 300), h = clamp(56 * unit, 44, 70); return { x: (W - w) / 2, y: H * 0.44 + clamp(56 * unit, 44, 70) + 18 * unit, w, h }; }
@@ -513,7 +570,14 @@ function tap(x, y) {
   if (state === STATE.STATS) { if (inRect(backRect(), x, y)) { state = STATE.LANG; return; } if (inRect(weakStartRect(), x, y)) { startWeak(); return; } if (inRect(resetRect(), x, y)) { allKeyStats = { miss: {}, att: {} }; try { localStorage.removeItem("typingKeyStats"); } catch (e) {} return; } return; }
   if (state === STATE.COURSE) { if (inRect(backRect(), x, y)) { state = STATE.LANG; return; } const c = hit(courseCards(), x, y); if (c) { chosen = c.item; state = STATE.FORMAT; } return; }
   if (state === STATE.FORMAT) { if (inRect(backRect(), x, y)) { state = STATE.COURSE; return; } if (inRect(formatToggleRect(), x, y)) { showRomaji = !showRomaji; try { localStorage.setItem("typingRomaji", showRomaji ? "1" : "0"); } catch (e) {} return; } const c = hit(formatCards(), x, y); if (c) { chosen._fmt = c.fmt; start(); } return; }
-  if (state === STATE.PLAY) { if (inRect(quitRect(), x, y)) { state = STATE.PAUSE; try { kb.blur(); } catch (e) {} } return; }
+  if (state === STATE.PLAY) {
+    if (inRect(quitRect(), x, y)) { state = STATE.PAUSE; try { kb.blur(); } catch (e) {} return; }
+    if (format === "listen" && words.length) {
+      if (inRect(listenReplayRect(), x, y)) { speakItem(words[0]); return; }
+      if (inRect(listenAnswerRect(), x, y)) { revealAnswer(); return; }
+    }
+    return;
+  }
   if (state === STATE.PAUSE) { if (inRect(pauseResumeRect(), x, y)) resume(); else if (inRect(pauseEndRect(), x, y)) gameOver(true); return; }
   if (state === STATE.OVER) { if (frame - overAt > 24) state = STATE.LANG; }
 }
@@ -539,6 +603,7 @@ window.addEventListener("keydown", e => {
   if (state === STATE.FORMAT) {
     if (e.code === "Escape" || e.code === "Backspace") { e.preventDefault(); state = STATE.COURSE; return; }
     if (e.code === "Digit1") { chosen._fmt = "game"; start(); } else if (e.code === "Digit2") { chosen._fmt = "practice"; start(); }
+    else if (e.code === "Digit3") { chosen._fmt = "listen"; start(); }
     else if (e.code === "KeyR") { showRomaji = !showRomaji; try { localStorage.setItem("typingRomaji", showRomaji ? "1" : "0"); } catch (e2) {} }
     return;
   }
@@ -556,7 +621,10 @@ function update() {
   frame++;
   if (shake > 0) shake *= 0.8;
   if (state === STATE.PLAY) {
-    if (format === "practice") {
+    if (format === "listen") {
+      if (subtitleT > 0) subtitleT--;
+      else if (words.length === 0) { const it = makeItem(nextPractice(), kind === "sentence"); it.x = W / 2; it.y = H * 0.42; it.vy = 0; words = [it]; active = it; speakItem(it); }
+    } else if (format === "practice") {
       if (words.length === 0) { const it = makeItem(nextPractice(), kind === "sentence"); it.x = W / 2; it.y = H * 0.46; it.vy = 0; words = [it]; active = it; }
     } else {
       if (kind === "sentence") { if (words.length === 0) { spawnT--; if (spawnT <= 0) { spawnGameItem(); spawnT = 28; } } }
@@ -633,8 +701,9 @@ function drawItem(w) {
   const guide = w.typed;                                // 下段: ローマ字/ピンイン/英単語
   const matched = jp ? jpMatched(w) : w.matched;
   const spaceBar = !jp && !w.freeSpace;                 // 英語のスペースのみ目印。日本語/中国語は細いすき間
-  const showGuide = single ? true : showRomaji;         // 英語は常に表示。日中はトグルで表示/非表示
-  const nativeText = single ? null : w.native;
+  const hiddenMode = format === "listen";               // きいて打つ: 全文は隠して打てた分だけ見せる
+  const showGuide = hiddenMode ? true : (single ? true : showRomaji); // 英語は常に表示。日中はトグルで表示/非表示
+  const nativeText = (single || hiddenMode) ? null : w.native;
   const bigN = clamp(22 * unit, 15, 28), sub = clamp(19 * unit, 13, 24), maxW = W * 0.84;
   ctx.font = `bold ${sub}px monospace`; const charW = ctx.measureText("m").width;
   const spaceW = spaceBar ? charW : charW * 0.4;        // 打たないスペースは狭く
@@ -662,6 +731,7 @@ function drawItem(w) {
     for (const c of l) {
       const done = c.gi < matched;
       if (c.ch === " ") { if (spaceBar) { const mw = charW * 0.62, mh = Math.max(2.5, 3 * unit); ctx.fillStyle = done ? "#ff3d7f" : "rgba(154,125,139,0.5)"; roundRect(x + (charW - mw) / 2, ly + sub * 0.26, mw, mh, mh / 2); ctx.fill(); } }
+      else if (hiddenMode && !done) { ctx.fillStyle = "rgba(154,125,139,0.55)"; ctx.fillText("·", x, ly); }
       else { ctx.fillStyle = done ? "#ff3d7f" : "#9a7d8b"; ctx.fillText(c.ch, x, ly); }
       x += cwOf(c.ch);
     }
@@ -673,7 +743,7 @@ function drawHUD() {
   const s1 = clamp(34 * unit, 26, 50);
   text("スコア " + score, s1, clamp(24 * unit, 16, 28), "#ff5e93", "left");
   const s2 = s1 + clamp(21 * unit, 16, 25);
-  text((chosen ? chosen.label : "") + "  /  " + (format === "game" ? "ゲーム" : "れんしゅう"), s2, clamp(14 * unit, 11, 17), "#a8436b", "left");
+  text((chosen ? chosen.label : "") + "  /  " + (format === "game" ? "ゲーム" : format === "listen" ? "きいて打つ" : "れんしゅう"), s2, clamp(14 * unit, 11, 17), "#a8436b", "left");
   if (format === "game") {
     const hr = clamp(11 * unit, 8, 14), hy = s2 + clamp(20 * unit, 15, 24);
     for (let i = 0; i < cfg.lives; i++) { ctx.fillStyle = i < lives ? "#ff5e93" : "rgba(255,255,255,0.5)"; ctx.beginPath(); ctx.arc(24 + i * hr * 2.5, hy, hr, 0, Math.PI * 2); ctx.fill(); }
@@ -777,8 +847,9 @@ function draw() {
     const cards = formatCards();
     card(cards[0], CAP_COLORS[3], cards[0].label, cards[0].sub, true);
     card(cards[1], CAP_COLORS[2], cards[1].label, cards[1].sub, true);
+    card(cards[2], CAP_COLORS[4], cards[2].label, cards[2].sub, true);
     pill(formatToggleRect(), showRomaji ? "#ffd9ec" : "rgba(255,255,255,0.85)", "#ff8fb5", "ローマ字ガイド：" + (showRomaji ? "あり" : "なし（むずかしい）"), "#c14b76");
-    text("（1=ゲーム 2=れんしゅう・R=ローマ字切替・Escでもどる）", H * 0.93, clamp(13 * unit, 9, 16), "#a8436b");
+    text("（1=ゲーム 2=れんしゅう 3=きいて打つ・R=ローマ字切替・Esc=もどる）", H * 0.93, clamp(13 * unit, 9, 16), "#a8436b");
     ctx.restore(); return;
   }
 
@@ -788,6 +859,22 @@ function draw() {
   for (const p of pops) { ctx.globalAlpha = Math.max(0, p.life); ctx.fillStyle = p.c; ctx.beginPath(); ctx.arc(p.x, p.y, 5 * unit, 0, Math.PI * 2); ctx.fill(); }
   ctx.globalAlpha = 1;
   drawHUD();
+
+  // きいて打つ: 操作ボタン & 字幕演出
+  if (format === "listen" && state === STATE.PLAY) {
+    if (words.length) {
+      pill(listenReplayRect(), "rgba(255,255,255,0.9)", "#ff8fb5", "🔊 もういちど", "#c14b76");
+      pill(listenAnswerRect(), "rgba(255,255,255,0.9)", "#ff8fb5", "👀 こたえ", "#c14b76");
+    }
+    if (lastSubtitle && subtitleT > 0) {
+      const sT = clamp(24 * unit, 16, 32), bandY = H * 0.5, bandH = sT * 4.6;
+      ctx.fillStyle = "rgba(60,30,50,0.62)"; ctx.fillRect(0, bandY, W, bandH);
+      const fit = (t, y, size, color) => { ctx.font = `bold ${size}px sans-serif`; const w0 = ctx.measureText(t).width; text(t, y, Math.min(size, size * (W * 0.92) / Math.max(w0, 1)), color); };
+      fit((revealedAnswer ? "こたえは…" : "せいかい！✨") + (lastSubtitle.hint ? "（" + lastSubtitle.hint + "）" : ""), bandY + sT * 1.1, sT * 0.66, "#ffd9ec");
+      fit(lastSubtitle.native, bandY + sT * 2.5, sT, "#fff");
+      fit(lastSubtitle.typed, bandY + sT * 3.7, sT * 0.66, "#ffd9ec");
+    }
+  }
 
   if (state === STATE.PAUSE) {
     ctx.fillStyle = "rgba(120,60,90,0.45)"; ctx.fillRect(0, 0, W, H);
