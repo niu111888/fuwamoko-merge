@@ -363,17 +363,25 @@ let voiceChoice = (function () { try { return JSON.parse(localStorage.getItem("t
 
 function itemLang(it) { return it._jp ? "ja" : (it.freeSpace ? "zh" : "en"); }
 function voicesFor(lc) { return ttsVoices.filter(v => (v.lang || "").toLowerCase().replace("_", "-").startsWith(lc)); }
-function voiceRank(v) { // 端末内のより自然な音声を優先
+const PREF_VOICES = {
+  en: ["samantha", "google us english", "alex", "daniel", "karen", "moira", "aaron"],
+  ja: ["kyoko", "o-ren", "google 日本語", "hattori", "otoya"],
+  zh: ["ting-ting", "tingting", "google 普通话", "meijia", "sinji", "li-mu"],
+};
+function voiceRank(v, lc) { // 端末内のより自然な音声を優先(余興ボイスは避ける)
   const n = (v.name || "").toLowerCase(); let s = 0;
-  if (n.includes("google")) s += 3;
-  if (n.includes("enhanced") || n.includes("premium") || n.includes("natural") || n.includes("neural")) s += 2;
-  if (n.includes("siri")) s += 2;
+  const pref = PREF_VOICES[lc] || []; const pi = pref.findIndex(p => n.includes(p)); if (pi >= 0) s += 100 - pi;
+  if (n.includes("google")) s += 8;
+  if (n.includes("enhanced") || n.includes("premium") || n.includes("natural") || n.includes("neural")) s += 6;
+  if (n.includes("siri")) s += 5;
+  if (v.default) s += 2;
+  if (v.localService) s += 1;
   return s;
 }
 function pickVoice(lc) {
   const list = voicesFor(lc); if (!list.length) return null;
   const saved = voiceChoice[lc]; const hit = list.find(v => v.name === saved); if (hit) return hit;
-  return list.slice().sort((a, b) => voiceRank(b) - voiceRank(a))[0];
+  return list.slice().sort((a, b) => voiceRank(b, lc) - voiceRank(a, lc))[0];
 }
 function cycleVoice(lc) {
   const list = voicesFor(lc); if (list.length < 2) return;
@@ -703,7 +711,7 @@ window.addEventListener("keydown", e => {
   }
   if (state === STATE.COURSE) {
     if (e.code === "Escape" || e.code === "Backspace") { e.preventDefault(); state = STATE.LANG; return; }
-    const m = e.code.match(/^Digit([1-9])$/); if (m) { const items = courseList(selLang); const idx = +m[1] - 1; if (items[idx]) { chosen = items[idx]; state = STATE.FORMAT; } }
+    const m = e.code.match(/^Digit([0-9])$/); if (m) { const items = courseList(selLang); const idx = (e.code === "Digit0" ? 9 : +m[1] - 1); if (items[idx]) { chosen = items[idx]; state = STATE.FORMAT; } }
     return;
   }
   if (state === STATE.FORMAT) {
@@ -812,7 +820,7 @@ function wrapTypedChars(typed, maxW, charW) {
 // ガイド行を自然な文字幅でレイアウト(等幅をやめて間隔を自然に)
 function layoutGuide(guide, sub, spaceBar, maxW) {
   ctx.font = `bold ${sub}px sans-serif`;
-  const adv = ch => ch === " " ? (spaceBar ? sub * 0.5 : sub * 0.32) : ctx.measureText(ch).width + sub * 0.06;
+  const adv = ch => ch === " " ? (spaceBar ? sub * 0.42 : sub * 0.3) : ctx.measureText(ch).width + sub * 0.06;
   const lines = []; let cur = [], curW = 0, lastSp = -1;
   for (let i = 0; i < guide.length; i++) {
     const ch = guide[i], a = adv(ch);
@@ -861,7 +869,7 @@ function drawItem(w) {
     let x = cx - l.w / 2; const ly = y + lineHt / 2;
     for (const c of l) {
       const done = c.gi < matched;
-      if (c.ch === " ") { if (spaceBar) { const mw = Math.max(4, sub * 0.32), mh = Math.max(2.5, 3 * unit); ctx.fillStyle = done ? doneCol : restCol; roundRect(x + (c.a - mw) / 2, ly + sub * 0.34, mw, mh, mh / 2); ctx.fill(); } }
+      if (c.ch === " ") { /* スペースは自然なすき間(目印なし) */ }
       else if (hiddenMode && !done) { ctx.fillStyle = restCol; ctx.fillText("·", x + c.a * 0.3, ly); }
       else { ctx.fillStyle = done ? doneCol : restCol; ctx.fillText(c.ch, x, ly); }
       x += c.a;
