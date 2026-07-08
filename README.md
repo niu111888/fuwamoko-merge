@@ -17,6 +17,7 @@ HTML・CSS・JavaScript だけで作られていて、**ビルド作業も外部
 |--------|----------|---------|
 | 🏠 ゲーム一覧（メニュー・トップ） | `index.html` | https://niu111888.github.io/fuwamoko-merge/ |
 | ふわもこタイピング 3カ国語（英語/中国語/日本語） | `typing.html` | https://niu111888.github.io/fuwamoko-merge/typing.html |
+| ふわもこ2048（2048パズル・難易度あり） | `num2048.html` | https://niu111888.github.io/fuwamoko-merge/num2048.html |
 | ふわもこマージ どうぶつ（スイカゲーム風） | `suika.html` | https://niu111888.github.io/fuwamoko-merge/suika.html |
 | パンチヒーロー ぶたさん | `hero.html` | https://niu111888.github.io/fuwamoko-merge/hero.html |
 
@@ -91,6 +92,7 @@ push すると **GitHub Pages が自動で再ビルド**して、数十秒後に
 fuwamoko-merge/
 ├── index.html   … ゲーム一覧メニュー（公開時のトップページ）
 ├── typing.html  … ふわもこタイピング 3カ国語（英語/中国語/日本語）
+├── num2048.html … ふわもこ2048（2048パズル・難易度あり）
 ├── suika.html   … ふわもこマージ どうぶつ（スイカゲーム風）
 ├── hero.html    … パンチヒーロー ぶたさん（アクション）
 ├── README.md    … このファイル（開発ガイド）

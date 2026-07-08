@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>ふわもこ2048</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; width: 100%; background: #ffe3f1; font-family: -apple-system, "Hiragino Maru Gothic ProN", "Hiragino Kaku Gothic ProN", sans-serif; overflow: hidden; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+  #game { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; cursor: pointer; }
+  #home { position: fixed; top: 8px; left: 8px; z-index: 10; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(255,255,255,0.6); color: #c14b76; font-size: 16px; text-decoration: none; box-shadow: 0 1px 4px rgba(150,80,110,0.25); }
+</style>
+</head>
+<body>
+<a id="home" href="index.html" title="ゲーム一覧へ">🏠</a>
+<canvas id="game"></canvas>
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+// ===== 難易度 =====
+const DIFFS = [
+  { key: "easy", label: "やさしい", sub: "5×5・ひろびろ", n: 5, target: 2048 },
+  { key: "normal", label: "ふつう", sub: "4×4・クラシック", n: 4, target: 2048 },
+  { key: "hard", label: "むずかしい", sub: "3×3・げきむず", n: 3, target: 1024 },
+];
+const bestKey = k => "n2048best_" + k;
+
+// ===== 見た目 =====
+const TILEBG = { 2: "#fff2f8", 4: "#ffe3f0", 8: "#ffcbe0", 16: "#ffb3d1", 32: "#ff9ec2", 64: "#ff85b0", 128: "#ffd98a", 256: "#ffcc6b", 512: "#ffc04d", 1024: "#ffb02e", 2048: "#ff6fa3" };
+function tileStyle(v) {
+  const bg = TILEBG[v] || "#c98bff";
+  const fg = (v === 128 || v === 256 || v === 512) ? "#7a5320" : (v <= 16 ? "#a8436b" : "#ffffff");
+  return { bg, fg };
+}
+
+// ===== レイアウト =====
+let W, H, boardX, boardY, boardSize, cell;
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = Math.floor(W * dpr); canvas.height = Math.floor(H * dpr);
+  canvas.style.width = W + "px"; canvas.style.height = H + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  boardSize = Math.min(W * 0.92, H * 0.56, 500);
+  boardX = (W - boardSize) / 2;
+  boardY = clamp(H * 0.3, 150, H - boardSize - 20);
+  cell = boardSize / N;
+}
+
+// ===== 状態 =====
+let N = 4, target = 2048, diff = DIFFS[1];
+let grid, score, best, won, overlay, history, floaters;
+const anim = { t: 1, moves: [] };
+const ANIM = 7, APPEAR = 6;
+let screen = "menu";
+grid = []; score = 0; best = 0; won = false; overlay = null; history = null; floaters = [];
+
+function emptyGrid() { return Array.from({ length: N }, () => Array(N).fill(null)); }
+function cellsEmpty() { const e = []; for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) if (!grid[r][c]) e.push([r, c]); return e; }
+function spawn() { const e = cellsEmpty(); if (!e.length) return null; const [r, c] = e[Math.floor(Math.random() * e.length)]; grid[r][c] = { val: Math.random() < 0.1 ? 4 : 2, appearT: 0, bumpT: 0 }; return grid[r][c]; }
+
+function newGame(d) {
+  diff = d; N = d.n; target = d.target;
+  best = Number(localStorage.getItem(bestKey(d.key)) || 0);
+  resize();
+  grid = emptyGrid(); score = 0; won = false; overlay = null; history = null; floaters = [];
+  spawn(); spawn();
+  anim.t = 1; anim.moves = [];
+  screen = "play";
+}
+
+function snapshot() { return { vals: grid.map(row => row.map(t => t ? t.val : 0)), score, won }; }
+function restore(s) { grid = s.vals.map(row => row.map(v => v ? { val: v, appearT: 1, bumpT: 0 } : null)); score = s.score; won = s.won; overlay = null; anim.t = 1; anim.moves = []; }
+function undo() { if (history && anim.t >= 1) { restore(history); history = null; } }
+
+function lines(dir) {
+  const L = [];
+  if (dir === "left" || dir === "right") { for (let r = 0; r < N; r++) { const cs = []; for (let c = 0; c < N; c++) cs.push([r, dir === "left" ? c : N - 1 - c]); L.push(cs); } }
+  else { for (let c = 0; c < N; c++) { const cs = []; for (let r = 0; r < N; r++) cs.push([dir === "up" ? r : N - 1 - r, c]); L.push(cs); } }
+  return L;
+}
+
+function move(dir) {
+  if (screen !== "play" || overlay || anim.t < 1) return;
+  const snap = snapshot();
+  const ng = emptyGrid(); const moves = []; let moved = false, gained = 0, reached = false;
+  for (const cs of lines(dir)) {
+    const seq = []; for (const [r, c] of cs) if (grid[r][c]) seq.push({ tile: grid[r][c], r, c });
+    const res = []; let i = 0;
+    while (i < seq.length) {
+      if (i + 1 < seq.length && seq[i].tile.val === seq[i + 1].tile.val) { res.push({ merge: true, val: seq[i].tile.val * 2, s: [seq[i], seq[i + 1]] }); i += 2; }
+      else { res.push({ merge: false, val: seq[i].tile.val, s: [seq[i]] }); i++; }
+    }
+    for (let k = 0; k < res.length; k++) {
+      const [tr, tc] = cs[k], R = res[k];
+      const t = { val: R.val, appearT: 1, bumpT: R.merge ? 1 : 0 };
+      if (R.merge) { gained += R.val; moved = true; if (R.val >= target) reached = true; }
+      ng[tr][tc] = t;
+      for (const src of R.s) { moves.push({ val: src.tile.val, fr: src.r, fc: src.c, tr, tc }); if (src.r !== tr || src.c !== tc) moved = true; }
+    }
+  }
+  if (!moved) return;
+  history = snap;
+  grid = ng; score += gained;
+  if (gained > 0) floaters.push({ text: "+" + gained, x: W / 2, y: boardY - 14, life: 1 });
+  const sp = spawn(); if (sp) { sp.appearT = 0; }
+  anim.t = 0; anim.moves = moves;
+  if (score > best) { best = score; localStorage.setItem(bestKey(diff.key), best); }
+  if (reached && !won) { won = true; overlay = "win"; }
+  else if (!canMove()) overlay = "over";
+}
+
+function canMove() {
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+    if (!grid[r][c]) return true;
+    const v = grid[r][c].val;
+    if (c + 1 < N && grid[r][c + 1] && grid[r][c + 1].val === v) return true;
+    if (r + 1 < N && grid[r + 1][c] && grid[r + 1][c].val === v) return true;
+  }
+  return false;
+}
+
+// ===== 入力 =====
+let ps = null;
+function dirFromKey(code) { return { ArrowLeft: "left", KeyA: "left", ArrowRight: "right", KeyD: "right", ArrowUp: "up", KeyW: "up", ArrowDown: "down", KeyS: "down" }[code]; }
+window.addEventListener("keydown", e => {
+  if (screen === "menu") { const m = e.code.match(/^Digit([1-3])$/); if (m) newGame(DIFFS[+m[1] - 1]); return; }
+  const d = dirFromKey(e.code);
+  if (d) { e.preventDefault(); if (overlay) return; move(d); return; }
+  if (e.code === "KeyU" || e.code === "Backspace") { e.preventDefault(); undo(); }
+  if (e.code === "KeyN") newGame(diff);
+  if (overlay && (e.code === "Space" || e.code === "Enter")) { if (overlay === "win") overlay = null; else newGame(diff); }
+});
+function inR(r, x, y) { return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h; }
+canvas.addEventListener("pointerdown", e => { e.preventDefault(); ps = { x: e.clientX, y: e.clientY, t: performance.now ? performance.now() : Date.now() }; });
+canvas.addEventListener("pointerup", e => {
+  e.preventDefault(); if (!ps) return;
+  const dx = e.clientX - ps.x, dy = e.clientY - ps.y, ax = Math.abs(dx), ay = Math.abs(dy); ps = null;
+  const tap = ax < 12 && ay < 12;
+  if (screen === "menu") { if (tap) { const c = hit(diffCards(), e.clientX, e.clientY); if (c) newGame(c.d); } return; }
+  if (overlay) { if (tap) overlayTap(e.clientX, e.clientY); return; }
+  if (tap) { if (inR(undoRect(), e.clientX, e.clientY)) undo(); else if (inR(newRect(), e.clientX, e.clientY)) newGame(diff); return; }
+  const th = 20; if (Math.max(ax, ay) < th) return;
+  move(ax > ay ? (dx > 0 ? "right" : "left") : (dy > 0 ? "down" : "up"));
+});
+canvas.addEventListener("pointercancel", () => { ps = null; });
+function hit(cards, x, y) { for (const c of cards) if (inR(c, x, y)) return c; return null; }
+function overlayTap(x, y) {
+  if (overlay === "win") { if (inR(winContRect(), x, y)) overlay = null; else if (inR(winNewRect(), x, y)) newGame(diff); }
+  else { if (inR(overNewRect(), x, y)) newGame(diff); else if (inR(overMenuRect(), x, y)) screen = "menu"; }
+}
+
+// ===== ボタン矩形 =====
+function headerY() { return boardY - clamp(64 * (boardSize / 400), 42, 74); }
+function undoRect() { const s = clamp(boardSize * 0.14, 44, 66); return { x: boardX, y: headerY(), w: s, h: s * 0.74 }; }
+function newRect() { const s = clamp(boardSize * 0.14, 44, 66); return { x: boardX + s + 8, y: headerY(), w: s, h: s * 0.74 }; }
+function diffCards() {
+  const cw = clamp(W * 0.7, 220, 400), ch = clamp(H * 0.12, 68, 110), gy = 16;
+  const x0 = (W - cw) / 2, y0 = H * 0.36;
+  return DIFFS.map((d, i) => ({ d, x: x0, y: y0 + i * (ch + gy), w: cw, h: ch }));
+}
+function ovBtn(dy) { const w = clamp(W * 0.5, 170, 280), h = clamp(54, 46, 62); return { x: (W - w) / 2, y: H * dy, w, h }; }
+function winContRect() { return ovBtn(0.5); }
+function winNewRect() { return ovBtn(0.5 + 0.11); }
+function overNewRect() { return ovBtn(0.5); }
+function overMenuRect() { return ovBtn(0.5 + 0.11); }
+
+// ===== 更新 =====
+function update() {
+  if (screen === "play") {
+    if (anim.t < 1) anim.t = Math.min(1, anim.t + 1 / ANIM);
+    else { for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) { const t = grid[r][c]; if (t) { if (t.appearT < 1) t.appearT = Math.min(1, t.appearT + 1 / APPEAR); if (t.bumpT > 0) t.bumpT *= 0.8; } } }
+  }
+  for (const f of floaters) { f.y -= 0.8; f.life -= 0.02; }
+  floaters = floaters.filter(f => f.life > 0);
+}
+
+// ===== 描画 =====
+function roundRect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+function text(t, x, y, size, color, align, weight) { ctx.fillStyle = color; ctx.font = `${weight || "bold"} ${size}px sans-serif`; ctx.textAlign = align || "center"; ctx.textBaseline = "middle"; ctx.fillText(t, x, y); }
+function cellCenter(r, c) { return { x: boardX + c * cell + cell / 2, y: boardY + r * cell + cell / 2 }; }
+function drawTile(cx, cy, val, scale) {
+  const st = tileStyle(val), w = cell * 0.86 * scale;
+  roundRect(cx - w / 2, cy - w / 2, w, w, w * 0.16); ctx.fillStyle = st.bg; ctx.fill();
+  const d = ("" + val).length, fs = cell * (d <= 2 ? 0.4 : d === 3 ? 0.32 : 0.25);
+  text(val, cx, cy + cell * 0.02, fs * scale, st.fg);
+}
+function drawBoard() {
+  roundRect(boardX - 8, boardY - 8, boardSize + 16, boardSize + 16, 18); ctx.fillStyle = "rgba(255,255,255,0.45)"; ctx.fill();
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) { const p = cellCenter(r, c), w = cell * 0.86; roundRect(p.x - w / 2, p.y - w / 2, w, w, w * 0.16); ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.fill(); }
+}
+function panel(x, y, w, h, label, value, big) {
+  roundRect(x, y, w, h, h * 0.24); ctx.fillStyle = "rgba(255,255,255,0.7)"; ctx.fill();
+  text(label, x + w / 2, y + h * 0.32, h * 0.24, "#a8436b");
+  text(value, x + w / 2, y + h * 0.68, h * 0.4, "#ff5e93");
+}
+
+function draw() {
+  const sky = ctx.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, "#ffe3f1"); sky.addColorStop(1, "#e8ecff");
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+
+  if (screen === "menu") {
+    text("ふわもこ2048", W / 2, H * 0.2, clamp(W * 0.09, 26, 46), "#ff5e93");
+    text("そろえて 大きく！ むずかしさを えらんでね", W / 2, H * 0.27, clamp(W * 0.04, 12, 18), "#a8436b");
+    const cards = diffCards(), cols = ["#d9f3d0", "#ffe7c2", "#ffd9ec"];
+    for (let i = 0; i < cards.length; i++) {
+      const c = cards[i]; roundRect(c.x, c.y, c.w, c.h, 16); ctx.fillStyle = cols[i]; ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.stroke();
+      text((i + 1) + ". " + c.d.label, c.x + c.w / 2, c.y + c.h * 0.36, clamp(c.h * 0.28, 16, 26), "#7a4458");
+      text(c.d.sub + "・めざせ" + c.d.target, c.x + c.w / 2, c.y + c.h * 0.68, clamp(c.h * 0.17, 11, 16), "#a8436b");
+      const b = Number(localStorage.getItem(bestKey(c.d.key)) || 0);
+      text("ベスト " + b, c.x + c.w - 14, c.y + c.h * 0.5, clamp(c.h * 0.16, 10, 15), "#c14b76", "right");
+    }
+    text("スワイプ / 矢印キーで うごかす", W / 2, H * 0.86, clamp(W * 0.038, 11, 16), "#a8436b");
+    return;
+  }
+
+  // HUD: 左に ↩/🔄、右に スコア/ベスト
+  const hy = headerY(), hh = clamp(boardSize * 0.14, 44, 66) * 0.74;
+  const rightW = boardSize - (undoRect().w * 2 + 8) - 10;
+  const halfW = (rightW - 8) / 2, rx = boardX + undoRect().w * 2 + 8 + 10;
+  panel(rx, hy, halfW, hh, "スコア", score);
+  panel(rx + halfW + 8, hy, halfW, hh, "ベスト", best);
+  // undo / new
+  const u = undoRect(); roundRect(u.x, u.y, u.w, u.h, u.h * 0.28); ctx.fillStyle = history ? "#ffd9ec" : "rgba(255,255,255,0.55)"; ctx.fill(); text("↩", u.x + u.w / 2, u.y + u.h / 2, u.h * 0.5, history ? "#c14b76" : "#cbb3bf");
+  const nb = newRect(); roundRect(nb.x, nb.y, nb.w, nb.h, nb.h * 0.28); ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.fill(); text("🔄", nb.x + nb.w / 2, nb.y + nb.h / 2, nb.h * 0.42, "#c14b76");
+  text("めざせ " + target, boardX + boardSize / 2, hy - hh * 0.42, clamp(boardSize * 0.035, 11, 16), "#a8436b");
+
+  drawBoard();
+
+  if (anim.t < 1) {
+    const e = 1 - Math.pow(1 - anim.t, 3);
+    for (const m of anim.moves) { const a = cellCenter(m.fr, m.fc), b = cellCenter(m.tr, m.tc); drawTile(a.x + (b.x - a.x) * e, a.y + (b.y - a.y) * e, m.val, 1); }
+  } else {
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) { const t = grid[r][c]; if (t) { const p = cellCenter(r, c); const sc = (1 - Math.pow(1 - t.appearT, 2)) * (1 + 0.2 * t.bumpT); drawTile(p.x, p.y, t.val, sc); } }
+  }
+
+  for (const f of floaters) { ctx.globalAlpha = Math.max(0, f.life); text(f.text, f.x, f.y, clamp(boardSize * 0.06, 16, 30), "#ff5e93"); ctx.globalAlpha = 1; }
+
+  if (overlay === "win") {
+    ctx.fillStyle = "rgba(255,170,205,0.55)"; ctx.fillRect(0, 0, W, H);
+    text("やったー！ ✨", W / 2, H * 0.34, clamp(W * 0.09, 28, 48), "#fff");
+    text(target + " を つくったよ！", W / 2, H * 0.42, clamp(W * 0.05, 16, 26), "#fff");
+    const a = winContRect(); roundRect(a.x, a.y, a.w, a.h, a.h / 2); ctx.fillStyle = "#fff"; ctx.fill(); text("▶ つづける", a.x + a.w / 2, a.y + a.h / 2, a.h * 0.4, "#ff5e93");
+    const b = winNewRect(); roundRect(b.x, b.y, b.w, b.h, b.h / 2); ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.fill(); text("🔄 さいしょから", b.x + b.w / 2, b.y + b.h / 2, b.h * 0.36, "#c14b76");
+  }
+  if (overlay === "over") {
+    ctx.fillStyle = "rgba(120,60,90,0.5)"; ctx.fillRect(0, 0, W, H);
+    text("おしまい！", W / 2, H * 0.32, clamp(W * 0.09, 28, 48), "#fff");
+    text("スコア " + score + "  /  ベスト " + best, W / 2, H * 0.4, clamp(W * 0.05, 15, 24), "#fff3b0");
+    const a = overNewRect(); roundRect(a.x, a.y, a.w, a.h, a.h / 2); ctx.fillStyle = "#fff"; ctx.fill(); text("🔄 もういちど", a.x + a.w / 2, a.y + a.h / 2, a.h * 0.4, "#ff5e93");
+    const b = overMenuRect(); roundRect(b.x, b.y, b.w, b.h, b.h / 2); ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.fill(); text("むずかしさ を かえる", b.x + b.w / 2, b.y + b.h / 2, b.h * 0.36, "#c14b76");
+  }
+}
+
+function loop() { update(); draw(); requestAnimationFrame(loop); }
+window.addEventListener("resize", () => { resize(); });
+resize(); loop();
+</script>
+</body>
+</html>
