@@ -13,9 +13,11 @@
     overflow: hidden; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
   }
   #game { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; cursor: pointer; }
+  #home { position: fixed; top: 8px; left: 8px; z-index: 10; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(255,255,255,0.6); color: #c14b76; font-size: 16px; text-decoration: none; box-shadow: 0 1px 4px rgba(150,80,110,0.25); }
 </style>
 </head>
 <body>
+<a id="home" href="index.html" title="ゲーム一覧へ">🏠</a>
 <canvas id="game"></canvas>
 <script>
 const canvas = document.getElementById("game");
@@ -297,8 +299,8 @@ function draw() {
   ctx.globalAlpha = 1;
 
   // HUD
-  text("スコア " + score, clamp(H * 0.07, 34, 70), clamp(binW * 0.06, 18, 30), "#ff5e93", "left");
-  text("ベスト " + best, clamp(H * 0.07, 34, 70) + clamp(binW * 0.06, 18, 30) * 0.9, clamp(binW * 0.04, 12, 18), "#a8436b", "left");
+  text("スコア " + score, clamp(H * 0.07, 34, 70), clamp(binW * 0.06, 18, 30), "#ff5e93", "left", 48);
+  text("ベスト " + best, clamp(H * 0.07, 34, 70) + clamp(binW * 0.06, 18, 30) * 0.9, clamp(binW * 0.04, 12, 18), "#a8436b", "left", 48);
   // 次の子
   const nr = clamp(binW * 0.05, 14, 26);
   text("つぎ", W - 20 - nr, clamp(H * 0.055, 26, 56), clamp(binW * 0.035, 11, 16), "#a8436b", "center", W - 20 - nr);

@@ -11,11 +11,14 @@ HTML・CSS・JavaScript だけで作られていて、**ビルド作業も外部
 
 ## 🎮 ゲーム一覧（公開URL）
 
+トップページ（`index.html`）は**ゲーム一覧のメニュー**で、そこから各ゲームへ移動できます。各ゲームには一覧に戻る 🏠 ボタンもあります。
+
 | ゲーム | ファイル | 公開URL |
 |--------|----------|---------|
-| ふわもこマージ どうぶつ（スイカゲーム風） | `suika.html` | https://niu111888.github.io/fuwamoko-merge/suika.html |
+| 🏠 ゲーム一覧（メニュー・トップ） | `index.html` | https://niu111888.github.io/fuwamoko-merge/ |
 | ふわもこタイピング 3カ国語（英語/中国語/日本語） | `typing.html` | https://niu111888.github.io/fuwamoko-merge/typing.html |
-| パンチヒーロー ぶたさん | `index.html` | https://niu111888.github.io/fuwamoko-merge/ |
+| ふわもこマージ どうぶつ（スイカゲーム風） | `suika.html` | https://niu111888.github.io/fuwamoko-merge/suika.html |
+| パンチヒーロー ぶたさん | `hero.html` | https://niu111888.github.io/fuwamoko-merge/hero.html |
 
 - スマホ・PCどちらのブラウザでも遊べます（レスポンシブ＆タッチ操作対応）。
 - スコアなどは各自のブラウザに自動保存されます（localStorage）。
@@ -86,9 +89,10 @@ push すると **GitHub Pages が自動で再ビルド**して、数十秒後に
 
 ```
 fuwamoko-merge/
-├── index.html   … パンチヒーロー ぶたさん（公開時のトップページ）
-├── suika.html   … ふわもこマージ どうぶつ（スイカゲーム風）
+├── index.html   … ゲーム一覧メニュー（公開時のトップページ）
 ├── typing.html  … ふわもこタイピング 3カ国語（英語/中国語/日本語）
+├── suika.html   … ふわもこマージ どうぶつ（スイカゲーム風）
+├── hero.html    … パンチヒーロー ぶたさん（アクション）
 ├── README.md    … このファイル（開発ガイド）
 └── .claude/
     └── launch.json … ローカルプレビュー用の設定（python http.server）

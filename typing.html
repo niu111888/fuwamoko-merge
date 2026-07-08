@@ -14,9 +14,11 @@
   }
   #game { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; cursor: pointer; }
   #kb { position: fixed; opacity: 0; pointer-events: none; top: 0; left: 0; width: 1px; height: 1px; border: 0; }
+  #home { position: fixed; top: 8px; left: 8px; z-index: 10; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(255,255,255,0.6); color: #c14b76; font-size: 16px; text-decoration: none; box-shadow: 0 1px 4px rgba(150,80,110,0.25); }
 </style>
 </head>
 <body>
+<a id="home" href="index.html" title="ゲーム一覧へ">🏠</a>
 <canvas id="game"></canvas>
 <input id="kb" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="latin">
 <script>
@@ -881,17 +883,18 @@ function drawItem(w) {
 function drawHUD() {
   const th = theatre, cMain = th ? "#ffd54f" : "#ff5e93", cSub = th ? "rgba(255,255,255,0.75)" : "#a8436b";
   const fmtLabel = { game: "おちもの", flow: "ながれもの", attack: "タイムアタック", practice: "れんしゅう", listen: "きいて打つ" }[format] || format;
+  const lx = 50;
   const s1 = clamp(34 * unit, 26, 50);
-  text("スコア " + score, s1, clamp(24 * unit, 16, 28), cMain, "left");
+  text("スコア " + score, s1, clamp(24 * unit, 16, 28), cMain, "left", lx);
   const s2 = s1 + clamp(21 * unit, 16, 25);
-  text((chosen ? chosen.label : "") + "  /  " + fmtLabel, s2, clamp(14 * unit, 11, 17), cSub, "left");
+  text((chosen ? chosen.label : "") + "  /  " + fmtLabel, s2, clamp(14 * unit, 11, 17), cSub, "left", lx);
   const s3 = s2 + clamp(20 * unit, 15, 24);
   if (hasLives()) {
     const hr = clamp(11 * unit, 8, 14);
-    for (let i = 0; i < cfg.lives; i++) { ctx.fillStyle = i < lives ? cMain : "rgba(255,255,255,0.5)"; ctx.beginPath(); ctx.arc(24 + i * hr * 2.5, s3, hr, 0, Math.PI * 2); ctx.fill(); }
+    for (let i = 0; i < cfg.lives; i++) { ctx.fillStyle = i < lives ? cMain : "rgba(255,255,255,0.5)"; ctx.beginPath(); ctx.arc(lx + 4 + i * hr * 2.5, s3, hr, 0, Math.PI * 2); ctx.fill(); }
   }
-  if (endSec > 0) text("のこり " + Math.max(0, Math.ceil(endSec - elapsedSec())) + "s", hasLives() ? s3 + clamp(20 * unit, 15, 24) : s3, clamp(15 * unit, 11, 18), Math.ceil(endSec - elapsedSec()) <= 10 ? "#ff3d7f" : cSub, "left");
-  else if (!hasLives()) text("じかん " + Math.floor(elapsedSec()) + "s", s3, clamp(14 * unit, 11, 17), cSub, "left");
+  if (endSec > 0) text("のこり " + Math.max(0, Math.ceil(endSec - elapsedSec())) + "s", hasLives() ? s3 + clamp(20 * unit, 15, 24) : s3, clamp(15 * unit, 11, 18), Math.ceil(endSec - elapsedSec()) <= 10 ? "#ff3d7f" : cSub, "left", lx);
+  else if (!hasLives()) text("じかん " + Math.floor(elapsedSec()) + "s", s3, clamp(14 * unit, 11, 17), cSub, "left", lx);
   pill(quitRect(), th ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.85)", th ? "#ffd54f" : "#ff8fb5", "⏸ やめる", th ? "#ffe082" : "#c14b76");
   const by = H - 16 * unit;
   text((hasLives() ? "コンボ " + combo : "WPM " + wpm() + "  コンボ " + combo), by, clamp(15 * unit, 11, 18), cSub, "left");

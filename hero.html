@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>パンチヒーロー ぶたさん</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%; width: 100%;
+    background: #ffe3f1;
+    font-family: -apple-system, "Hiragino Maru Gothic ProN", "Hiragino Kaku Gothic ProN", sans-serif;
+    overflow: hidden;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #game { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; cursor: pointer; }
+  #home { position: fixed; top: 8px; left: 8px; z-index: 10; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(255,255,255,0.6); color: #c14b76; font-size: 16px; text-decoration: none; box-shadow: 0 1px 4px rgba(150,80,110,0.25); }
+</style>
+</head>
+<body>
+<a id="home" href="index.html" title="ゲーム一覧へ">🏠</a>
+<canvas id="game"></canvas>
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+// ===== レスポンシブ =====
+let W, H, unit, GROUND_TOP;
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = Math.floor(W * dpr); canvas.height = Math.floor(H * dpr);
+  canvas.style.width = W + "px"; canvas.style.height = H + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  unit = Math.min(W, H * 0.62) / 400;
+  GROUND_TOP = H - Math.max(H * 0.18, 100);
+  if (hero) { hero.r = clamp(34 * unit, 22, 50); hero.x = W * 0.24; hero.y = GROUND_TOP - hero.r; }
+}
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+// ===== 状態 =====
+const STATE = { READY: 0, PLAY: 1, WIN: 2, OVER: 3 };
+let state = STATE.READY;
+let hero, enemies, stars, floaters, lives, defeated, goal, spawnT, frame, winT, overAt, shake;
+let best = Number(localStorage.getItem("heroBest") || 0); // 最高クリアタイム的に最多救出? ここでは最短クリア不要、最高連続KOを記録
+enemies = []; stars = []; floaters = [];
+frame = 0; winT = 0; shake = 0; lives = 3; defeated = 0; goal = 3;
+hero = { x: 0, y: 0, r: 34, punchT: 0, hurtT: 0, faceT: 0, bob: 0 }; // READY画面でも描画するので最初から用意
+
+function reset() {
+  hero = { x: 0, y: 0, r: 34, punchT: 0, hurtT: 0, faceT: 0, bob: 0 };
+  resize();
+  hero.y = GROUND_TOP - hero.r;
+  enemies = []; stars = []; floaters = [];
+  lives = 3; defeated = 0; goal = 3;
+  spawnT = 60; frame = 0; winT = 0; shake = 0;
+  state = STATE.PLAY;
+}
+
+function punch() {
+  if (hero.punchT > 6) return;       // 連打しすぎ防止
+  hero.punchT = 14;
+  hero.punchHit = null;
+  const reach = hero.r * 3.2;
+  const front = hero.x + hero.r * 0.6;
+  // 射程内で一番近い悪者をKO
+  let target = null;
+  for (const e of enemies) {
+    if (e.ko) continue;
+    if (e.x > hero.x && e.x - front < reach) {
+      if (!target || e.x < target.x) target = e;
+    }
+  }
+  if (target) {
+    // お腹の中心(命中点)を記録 → 拳がここまで正確に届く
+    const bellyX = target.x, bellyY = target.y + target.r * 0.25;
+    hero.punchHit = { dx: bellyX - hero.x, dy: bellyY - hero.y };
+    target.ko = true;
+    target.vx = 7 * unit; target.vy = -11 * unit; target.spin = 0.3;
+    defeated++;
+    for (let i = 0; i < 14; i++)
+      stars.push({ x: bellyX, y: bellyY, vx: (Math.random() - 0.3) * 7, vy: (Math.random() - 0.8) * 7, life: 1 });
+    shake = 6;
+    if (defeated >= goal) winGame();
+  }
+}
+
+function hurt() {
+  lives--;
+  hero.hurtT = 40;
+  shake = 8;
+  if (lives <= 0) { state = STATE.OVER; overAt = frame; }
+}
+
+function winGame() {
+  state = STATE.WIN; winT = 0; enemies = [];
+  if (defeated > best) { best = defeated; localStorage.setItem("heroBest", best); }
+}
+
+// ===== 入力 =====
+function tap() {
+  if (state === STATE.READY) reset();
+  else if (state === STATE.PLAY) punch();
+  else if (state === STATE.WIN || state === STATE.OVER) { if (frame - overAt > 40) state = STATE.READY; }
+}
+canvas.addEventListener("pointerdown", e => { e.preventDefault(); tap(); });
+window.addEventListener("keydown", e => {
+  if (["Space", "ArrowUp", "Enter", "KeyZ"].includes(e.code)) { e.preventDefault(); tap(); }
+});
+
+// ===== 生成 =====
+function spawnEnemy() {
+  const r = clamp((26 + Math.random() * 8) * unit, 18, 44);
+  const sp = (1.3 + Math.random() * 0.6 + defeated * 0.06) * unit;
+  enemies.push({ x: W + r, y: GROUND_TOP - r, r, vx: 0, vy: 0, spin: 0, ko: false, speed: Math.min(sp, 3.4 * unit), walk: Math.random() * 6 });
+}
+
+// ===== 更新 =====
+function update() {
+  frame++;
+  if (shake > 0) shake *= 0.85;
+  if (hero) { if (hero.punchT > 0) hero.punchT--; if (hero.hurtT > 0) hero.hurtT--; hero.bob += 0.15; }
+
+  if (state === STATE.PLAY) {
+    spawnT--;
+    if (spawnT <= 0) {
+      spawnEnemy();
+      const base = Math.max(34, 78 - defeated * 3);
+      spawnT = base + Math.random() * 40;
+    }
+    for (const e of enemies) {
+      if (e.ko) {
+        e.x += e.vx; e.y += e.vy; e.vy += 0.6 * unit; e.spin += 0.25; e.walk += 0.3;
+      } else {
+        e.x -= e.speed; e.walk += e.speed * 0.06;
+        if (e.x <= hero.x + hero.r * 0.75) { e.hitDone = true; hurt(); }
+      }
+    }
+    enemies = enemies.filter(e => !e.hitDone && e.x > -e.r * 2 && e.y < H + e.r * 2);
+  }
+
+  if (state === STATE.WIN) {
+    winT++;
+    if (winT % 6 === 0)
+      floaters.push({ x: W * 0.5 + (Math.random() - 0.5) * W * 0.4, y: GROUND_TOP, vy: -(1.5 + Math.random()) * unit, life: 1, r: (10 + Math.random() * 8) * unit });
+  }
+
+  for (const s of stars) { s.x += s.vx; s.y += s.vy; s.vy += 0.3; s.life -= 0.03; }
+  stars = stars.filter(s => s.life > 0);
+  for (const f of floaters) { f.y += f.vy; f.life -= 0.012; }
+  floaters = floaters.filter(f => f.life > 0);
+}
+
+// ===== 描画: キャラ =====
+function withShadow(cx, cy, r, drawer) {
+  ctx.save(); ctx.translate(cx, cy);
+  ctx.fillStyle = "rgba(150,110,130,0.18)";
+  ctx.beginPath(); ctx.ellipse(0, (GROUND_TOP - cy), r * 0.9, r * 0.26, 0, 0, Math.PI * 2); ctx.fill();
+  drawer(r);
+  ctx.restore();
+}
+
+function feet(r, color, phase) {
+  const sw = Math.sin(phase) * r * 0.3;
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.ellipse(-r * 0.35 + sw, r * 0.85, r * 0.26, r * 0.18, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(r * 0.35 - sw, r * 0.85, r * 0.26, r * 0.18, 0, 0, Math.PI * 2); ctx.fill();
+}
+
+function face(r, eyeColor, expr) {
+  // expr: 'happy' | 'angry' | 'normal'
+  ctx.fillStyle = eyeColor;
+  if (expr === "angry") {
+    // つり眉
+    ctx.strokeStyle = "#3a2030"; ctx.lineWidth = r * 0.09; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(-r * 0.28, -r * 0.32); ctx.lineTo(-r * 0.02, -r * 0.18); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(r * 0.62, -r * 0.32); ctx.lineTo(r * 0.36, -r * 0.18); ctx.stroke();
+  }
+  ctx.fillStyle = eyeColor;
+  ctx.beginPath(); ctx.arc(-r * 0.1, -r * 0.05, r * 0.1, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(r * 0.5, -r * 0.05, r * 0.1, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = "#fff";
+  ctx.beginPath(); ctx.arc(-r * 0.07, -r * 0.09, r * 0.035, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(r * 0.53, -r * 0.09, r * 0.035, 0, Math.PI * 2); ctx.fill();
+  // くち
+  ctx.strokeStyle = "#b5566f"; ctx.lineWidth = r * 0.06; ctx.lineCap = "round";
+  ctx.beginPath();
+  if (expr === "happy") { ctx.arc(r * 0.2, r * 0.18, r * 0.18, 0.1 * Math.PI, 0.9 * Math.PI); }
+  else if (expr === "angry") { ctx.arc(r * 0.2, r * 0.4, r * 0.18, 1.15 * Math.PI, 1.85 * Math.PI); }
+  else { ctx.moveTo(r * 0.08, r * 0.22); ctx.lineTo(r * 0.34, r * 0.22); }
+  ctx.stroke();
+}
+
+function drawPigHero(cx, cy, r, expr) {
+  withShadow(cx, cy, r, (r) => {
+    feet(r, "#f5a9c4", state === STATE.PLAY ? 0 : hero.bob);
+    // マント(ヒーロー)
+    ctx.fillStyle = "#ff5e93";
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.2, -r * 0.4);
+    ctx.quadraticCurveTo(-r * 1.3, 0, -r * 0.6, r * 0.9);
+    ctx.lineTo(-r * 0.1, r * 0.5);
+    ctx.closePath(); ctx.fill();
+    // みみ
+    ctx.fillStyle = "#f078a6";
+    for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(s * r * 0.55, -r * 0.55); ctx.lineTo(s * r * 0.9, -r * 0.95); ctx.lineTo(s * r * 0.95, -r * 0.4); ctx.closePath(); ctx.fill(); }
+    // からだ
+    ctx.fillStyle = "#ffb0cd"; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+    // ほっぺ
+    ctx.fillStyle = "#ff8fb5"; ctx.beginPath(); ctx.arc(r * 0.62, r * 0.2, r * 0.15, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(-r * 0.32, r * 0.2, r * 0.15, 0, Math.PI * 2); ctx.fill();
+    // ヒーローのアイマスク(目の下地。この上に目が乗る)
+    ctx.fillStyle = "#ff3d7f"; ctx.beginPath(); ctx.ellipse(-r * 0.02, -r * 0.09, r * 0.62, r * 0.2, 0, 0, Math.PI * 2); ctx.fill();
+    face(r, "#7a4458", expr || "normal");
+    // はな
+    ctx.fillStyle = "#ff8fb5"; ctx.beginPath(); ctx.ellipse(r * 0.3, r * 0.1, r * 0.24, r * 0.18, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#e06b93"; ctx.beginPath(); ctx.arc(r * 0.22, r * 0.1, r * 0.045, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(r * 0.4, r * 0.1, r * 0.045, 0, Math.PI * 2); ctx.fill();
+    // パンチの腕 — 拳が悪者のお腹(命中点)まで正確に伸びる
+    if (hero.punchT > 0) {
+      const pr = Math.sin((hero.punchT / 14) * Math.PI); // 0→1→0
+      const fx = (hero.punchHit ? hero.punchHit.dx : r * 2.8) * pr;
+      const fy = (hero.punchHit ? hero.punchHit.dy : r * 0.06) * pr;
+      ctx.strokeStyle = "#f5a9c4"; ctx.lineWidth = r * 0.26; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(0, r * 0.06); ctx.lineTo(fx, fy); ctx.stroke();
+      ctx.fillStyle = "#ff8fb5";
+      ctx.beginPath(); ctx.arc(fx, fy, r * 0.32, 0, Math.PI * 2); ctx.fill();
+    }
+  });
+}
+
+function drawBadGuy(e) {
+  const r = e.r;
+  ctx.save();
+  ctx.translate(e.x, e.y);
+  if (e.ko) ctx.rotate(e.spin);
+  // 影
+  if (!e.ko) { ctx.fillStyle = "rgba(150,110,130,0.18)"; ctx.beginPath(); ctx.ellipse(0, (GROUND_TOP - e.y), r * 0.9, r * 0.26, 0, 0, Math.PI * 2); ctx.fill(); }
+  // あし
+  feet(r, "#6d5a7a", e.walk);
+  // からだ(むらさきっぽい悪者)
+  ctx.fillStyle = "#9b8ab5"; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+  // おなか(パンチの的)
+  ctx.fillStyle = "#bcaed4"; ctx.beginPath(); ctx.arc(0, r * 0.25, r * 0.45, 0, Math.PI * 2); ctx.fill();
+  // 覆面
+  ctx.fillStyle = "#3a2f4a";
+  ctx.beginPath(); ctx.moveTo(-r, -r * 0.35); ctx.lineTo(r, -r * 0.35); ctx.lineTo(r, r * 0.05); ctx.quadraticCurveTo(0, -r * 0.05, -r, r * 0.05); ctx.closePath(); ctx.fill();
+  // め(おこ)
+  ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(-r * 0.3, -r * 0.12, r * 0.1, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(r * 0.3, -r * 0.12, r * 0.1, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = "#000"; ctx.beginPath(); ctx.arc(-r * 0.26, -r * 0.12, r * 0.045, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(r * 0.34, -r * 0.12, r * 0.045, 0, Math.PI * 2); ctx.fill();
+  // くち
+  ctx.strokeStyle = "#3a2030"; ctx.lineWidth = r * 0.07; ctx.lineCap = "round";
+  ctx.beginPath();
+  if (e.ko) { ctx.arc(0, r * 0.55, r * 0.14, 0, Math.PI * 2); }   // KOで口あんぐり
+  else { ctx.arc(0, r * 0.62, r * 0.2, 1.15 * Math.PI, 1.85 * Math.PI); }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawBunny(cx, cy, r, expr) {
+  withShadow(cx, cy, r, (r) => {
+    feet(r, "#f3e0e8", frame * 0.2);
+    for (const s of [-1, 1]) {
+      ctx.save(); ctx.translate(s * r * 0.42, -r * 0.55); ctx.rotate(s * 0.2);
+      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.ellipse(0, -r * 0.85, r * 0.22, r * 0.95, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#ffc2dd"; ctx.beginPath(); ctx.ellipse(0, -r * 0.85, r * 0.1, r * 0.6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#ffb3d1"; ctx.beginPath(); ctx.arc(r * 0.55, r * 0.2, r * 0.16, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(-r * 0.35, r * 0.2, r * 0.16, 0, Math.PI * 2); ctx.fill();
+    face(r, "#5a3a4a", expr || "happy");
+    ctx.fillStyle = "#ff7fa8"; ctx.beginPath(); ctx.arc(r * 0.3, r * 0.05, r * 0.09, 0, Math.PI * 2); ctx.fill();
+  });
+}
+
+// ===== 描画: 風景・UI =====
+function drawWorld() {
+  const sky = ctx.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, "#ffe3f1"); sky.addColorStop(1, "#d8f0ff");
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = "rgba(255,255,255,0.75)";
+  for (let i = 0; i < 4; i++) {
+    const cx = ((i * (W / 3 + 40) - frame * 0.3) % (W + 120) + W + 120) % (W + 120) - 60;
+    const cy = H * 0.12 + i * H * 0.07;
+    ctx.beginPath(); ctx.arc(cx, cy, 18 * unit, 0, Math.PI * 2); ctx.arc(cx + 22 * unit, cy, 24 * unit, 0, Math.PI * 2); ctx.arc(cx + 46 * unit, cy, 16 * unit, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.fillStyle = "#cdeeb0"; ctx.fillRect(0, GROUND_TOP, W, H - GROUND_TOP);
+  ctx.fillStyle = "#aee08a"; ctx.fillRect(0, GROUND_TOP, W, 8 * unit);
+  for (let x = (-frame * 0.6 % (60 * unit)); x < W; x += 60 * unit) {
+    const fy = GROUND_TOP + 32 * unit; ctx.fillStyle = "#ffd9ec";
+    for (let a = 0; a < 5; a++) { const ang = (a / 5) * Math.PI * 2; ctx.beginPath(); ctx.arc(x + Math.cos(ang) * 4 * unit, fy + Math.sin(ang) * 4 * unit, 2.4 * unit, 0, Math.PI * 2); ctx.fill(); }
+    ctx.fillStyle = "#ffe98a"; ctx.beginPath(); ctx.arc(x, fy, 2 * unit, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function drawHeartIcon(x, y, r, filled) {
+  ctx.save(); ctx.translate(x, y);
+  ctx.fillStyle = filled ? "#ff5e93" : "rgba(255,255,255,0.45)";
+  ctx.beginPath();
+  ctx.moveTo(0, r * 0.5);
+  ctx.bezierCurveTo(r, -r * 0.4, r * 0.4, -r, 0, -r * 0.3);
+  ctx.bezierCurveTo(-r * 0.4, -r, -r, -r * 0.4, 0, r * 0.5);
+  ctx.fill(); ctx.restore();
+}
+
+function text(t, y, size, color, align, x) {
+  ctx.fillStyle = color || "#fff"; ctx.font = `bold ${size}px sans-serif`;
+  ctx.textAlign = align || "center"; ctx.lineWidth = size * 0.12; ctx.strokeStyle = "rgba(120,60,90,0.4)";
+  const px = x != null ? x : (align === "left" ? 20 : W / 2);
+  ctx.strokeText(t, px, y); ctx.fillText(t, px, y);
+}
+
+function drawHUD() {
+  // ライフ
+  const hr = clamp(13 * unit, 9, 16);
+  for (let i = 0; i < 3; i++) drawHeartIcon(W - 24 - i * (hr * 2.4), 30, hr, i < lives);
+  // 進捗バー(救出まで)
+  const bw = clamp(W * 0.5, 140, 360), bx = (W - bw) / 2, by = 26, bh = clamp(16 * unit, 12, 20);
+  ctx.fillStyle = "rgba(255,255,255,0.6)"; roundRect(bx, by, bw, bh, bh / 2); ctx.fill();
+  ctx.fillStyle = "#ff7fa8"; roundRect(bx, by, bw * Math.min(1, defeated / goal), bh, bh / 2); ctx.fill();
+  text("救出まで " + Math.min(defeated, goal) + " / " + goal, by + bh + clamp(18 * unit, 13, 20), clamp(15 * unit, 11, 18), "#a8436b");
+  // ゴール(おり+うさぎ)を右はしに表示
+}
+
+function roundRect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+
+function drawCage(cx, cy, r) {
+  // おりの中のうさぎちゃん(ゴール)
+  drawBunny(cx, cy, r * 0.8, "happy");
+  ctx.strokeStyle = "rgba(120,90,110,0.8)"; ctx.lineWidth = 3 * unit;
+  ctx.strokeRect(cx - r, cy - r * 1.4, r * 2, r * 2.4);
+  for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.moveTo(cx + i * r * 0.5, cy - r * 1.4); ctx.lineTo(cx + i * r * 0.5, cy + r); ctx.stroke(); }
+}
+
+// ===== 画面 =====
+function draw() {
+  ctx.save();
+  if (shake > 0.4) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+  drawWorld();
+
+  if (state === STATE.READY) {
+    drawPigHero(W * 0.5, GROUND_TOP - clamp(40 * unit, 26, 56), clamp(40 * unit, 26, 56), "happy");
+    text("パンチヒーロー", H * 0.2, clamp(36 * unit, 24, 44), "#ff5e93");
+    text("ぶたさん", H * 0.27, clamp(30 * unit, 20, 38), "#ff5e93");
+    text("悪者のお腹をパンチ！ うさぎちゃんを救え！", H * 0.85, clamp(17 * unit, 12, 20), "#a8436b");
+    text("▶ タップでスタート ◀", H * 0.92, clamp(18 * unit, 13, 22), "#a8436b");
+    ctx.restore(); return;
+  }
+
+  // ゴールのおり(右端) — プレイ中のみ。救出後(WIN)は空っぽにする
+  const cageR = clamp(34 * unit, 22, 48);
+  if (state === STATE.PLAY || state === STATE.OVER) drawCage(W - cageR * 1.4, GROUND_TOP - cageR * 0.9, cageR);
+
+  enemies.forEach(drawBadGuy);
+
+  // ヒーロー
+  const expr = hero.hurtT > 0 && Math.floor(hero.hurtT / 4) % 2 === 0 ? "angry" : (state === STATE.WIN ? "happy" : "angry");
+  if (!(hero.hurtT > 0 && Math.floor(hero.hurtT / 5) % 2 === 0)) drawPigHero(hero.x, hero.y, hero.r, expr);
+
+  // 星(パンチ命中)
+  for (const s of stars) { ctx.globalAlpha = Math.max(0, s.life); drawStar(s.x, s.y, 6 * unit); }
+  ctx.globalAlpha = 1;
+
+  drawHUD();
+
+  if (state === STATE.WIN) {
+    // 救出されたうさぎちゃんがヒーローの隣に
+    drawBunny(hero.x + hero.r * 2.2, GROUND_TOP - hero.r * 0.8 - Math.abs(Math.sin(frame * 0.18)) * hero.r * 0.5, hero.r * 0.8, "happy");
+    for (const f of floaters) { ctx.globalAlpha = Math.max(0, f.life); drawHeartIcon(f.x, f.y, f.r, true); }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "rgba(255,170,200,0.45)"; ctx.fillRect(0, 0, W, H);
+    text("YOU ARE A HERO!", H * 0.38, clamp(40 * unit, 26, 52), "#fff");
+    text("LOVE YOU ♡", H * 0.49, clamp(30 * unit, 20, 38), "#fff3b0");
+    text("Tap to play again", H * 0.62, clamp(18 * unit, 13, 22), "#fff");
+  }
+  if (state === STATE.OVER) {
+    ctx.fillStyle = "rgba(90,60,80,0.5)"; ctx.fillRect(0, 0, W, H);
+    text("GAME OVER", H * 0.42, clamp(40 * unit, 26, 52), "#fff");
+    text("悪者に やられてしまった…", H * 0.52, clamp(20 * unit, 14, 26), "#ffd9ec");
+    text("Tap to try again", H * 0.62, clamp(18 * unit, 13, 22), "#fff");
+  }
+  ctx.restore();
+}
+
+function drawStar(x, y, r) {
+  ctx.fillStyle = "#fff06a";
+  ctx.beginPath();
+  for (let i = 0; i < 5; i++) {
+    const a = -Math.PI / 2 + i * (Math.PI * 2 / 5);
+    ctx.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r);
+    const a2 = a + Math.PI / 5;
+    ctx.lineTo(x + Math.cos(a2) * r * 0.45, y + Math.sin(a2) * r * 0.45);
+  }
+  ctx.closePath(); ctx.fill();
+}
+
+function loop() { update(); draw(); requestAnimationFrame(loop); }
+window.addEventListener("resize", resize);
+resize();
+loop();
+</script>
+</body>
+</html>
